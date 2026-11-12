@@ -1,0 +1,14 @@
+# Secrets et configuration locale : jamais dans Git
+config.toml
+*.local.toml
+.env
+*.env
+
+# Rapports de sonde (contiennent IP et noms)
+patchwarden-sonde-*.txt
+
+# Build
+/bin/
+/dist/
+*.db
+*.db-*

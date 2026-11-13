@@ -9,6 +9,9 @@
 | Accès aux nœuds | Clé SSH dédiée sur **root**, restreinte par `from=<IP PatchWarden>`, `restrict` et `command=` vers un wrapper qui n'accepte qu'un vocabulaire fixe (pas de `sudo` sur les nœuds, rien à installer hormis le wrapper). Scripts d'action installés et versionnés sur le nœud. Rien n'agit sur l'hôte lui-même. En cluster, `/root/.ssh/authorized_keys` est partagé par tous les nœuds : le wrapper doit être présent sur chacun |
 | Inventaire | API Proxmox `/cluster/resources`, jeton `PVEAuditor` (lecture seule). Cluster `Home` de 3 nœuds aujourd'hui, mais sortie possible : la configuration accepte un ou plusieurs points d'accès, chacun avec son jeton, et fusionne les résultats en dédoublonnant (nœud, VMID). Les deux modes fonctionnent sans changement de code |
 | VMs | `qemu-guest-agent` présent et activé sur toutes les VMs |
+| Docker | Stacks Portainer : API Portainer (re-déploiement avec re-pull, un jeton par instance : VM 102, 107, 503). Compose classique : `docker compose pull && up -d`. `docker run` : détection seulement |
+| Emplacement | LXC PatchWarden sur **ODIN**, réseau MGMT |
+| Invités arrêtés | Ignorés par défaut (détection et action). Action « démarrer, mettre à jour, arrêter » à la demande |
 | Ressources insuffisantes (code 113) | Augmentation temporaire CPU/RAM au niveau demandé par le script, puis **restauration** des valeurs d'origine, même en cas d'échec. Activable invité par invité |
 | LXC de test | CT 103 `dev` (LOKI, Debian 13, base `ct/debian.sh`) ; CT 104 `termix` pour la détection de version |
 | Vérification | Sonde `tools/sonde.sh`, lancée à la main sur le nœud, rapport collé dans la conversation |
@@ -115,7 +118,5 @@ Constats :
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).
-8. LXC PatchWarden : nœud, VLAN, accès Internet, jeton GitHub en lecture seule.
-9. Invités arrêtés (ex. CT 108 teamspeak) : ignorés par défaut ?
+8. LXC PatchWarden : IP, accès Internet, jeton GitHub en lecture seule.
 12. Versions de PVE et des OS d'invités ; `pve-ups` et Dev inclus ; langue de l'interface.
-15. Docker : API Portainer pour les stacks Portainer (un jeton par instance : VM 102, 107, 503), compose direct pour les autres ?

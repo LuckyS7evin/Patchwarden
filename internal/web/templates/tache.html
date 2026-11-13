@@ -1,0 +1,24 @@
+{{define "content"}}
+{{with .Job}}
+<p class="crumbs"><a href="/taches">Tâches</a> › {{.ID}}</p>
+<div class="pagehead">
+  <div>
+    <h1>{{.Kind}}{{if .DryRun}} (simulation){{end}} · <a href="/invites/{{.Target.Node}}/{{.Target.VMID}}">{{.Target.Name}}</a></h1>
+    <p class="muted">{{.Target.Node}}/{{.Target.VMID}} · demandée par {{.RequestedBy}} le {{date .CreatedAt}}{{if not .StartedAt.IsZero}} · durée {{.Duration}}{{end}}</p>
+  </div>
+  <span class="badge badge-big badge-{{statusClass .Status}}" id="statut">{{.Status}}</span>
+</div>
+{{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+{{if .Summary}}<p class="alert alert-info">{{.Summary}}</p>{{end}}
+{{end}}
+
+<div class="logbar">
+  <h2>Journal complet</h2>
+  {{if .Live}}<label class="small"><input type="checkbox" id="suivre" checked> suivre la fin</label>{{end}}
+</div>
+<pre class="log" id="journal"{{if .Live}} data-flux="/taches/{{.Job.ID}}/flux"{{end}}>{{range .Lines}}<span{{if .Stderr}} class="err"{{end}}>{{clock .T}}  {{.Text}}
+</span>{{end}}</pre>
+{{if .Live}}<noscript><p class="muted">Le suivi en direct utilise JavaScript : rechargez la page pour voir la suite.</p></noscript>{{end}}
+{{end}}
+
+{{define "scripts"}}{{if .Live}}<script src="/static/tache.js" defer></script>{{end}}{{end}}

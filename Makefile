@@ -12,7 +12,7 @@ test:
 check: test
 	go vet ./...
 	@test -z "$$(gofmt -l .)" || (echo "Fichiers non formatés :"; gofmt -l .; exit 1)
-	shellcheck -S warning tools/sonde.sh
+	shellcheck -S warning tools/sonde.sh deploy/patchwarden-wrapper
 
 clean:
 	rm -rf bin

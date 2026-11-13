@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/LuckyS7evin/patchwarden/internal/config"
+	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
+	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 )
 
 //go:embed templates/*.html static/*
@@ -27,10 +29,39 @@ type Inventory interface {
 	TriggerRefresh()
 }
 
+// Engine lance les tâches (détection, puis mises à jour).
+type Engine interface {
+	CanDetect(g inventory.Guest) error
+	Detect(g inventory.Guest, user string) (jobs.Job, error)
+	DetectAll(guests []inventory.Guest, user string) (started, skipped int)
+}
+
+// Jobs donne accès aux tâches et à leur journal.
+type Jobs interface {
+	Get(id string) (jobs.Job, bool)
+	List(targetKey string, limit int) []jobs.Job
+	ActiveFor(t jobs.Target) (jobs.Job, bool)
+	Log(id string) ([]jobs.Line, error)
+	Subscribe(id string) ([]jobs.Line, <-chan jobs.Event, func(), error)
+}
+
+// Detections donne le dernier résultat de détection par invité.
+type Detections interface {
+	Get(key string) (detect.Result, bool)
+}
+
+// Deps regroupe ce dont l'interface a besoin en plus de l'inventaire.
+type Deps struct {
+	Engine     Engine
+	Jobs       Jobs
+	Detections Detections
+}
+
 // Server porte l'état de l'interface.
 type Server struct {
 	cfg     *config.Config
 	inv     Inventory
+	deps    Deps
 	log     *slog.Logger
 	version string
 	now     func() time.Time
@@ -40,13 +71,30 @@ type Server struct {
 }
 
 // New prépare le serveur (gabarits compris).
-func New(cfg *config.Config, inv Inventory, log *slog.Logger, version string) (*Server, error) {
-	s := &Server{cfg: cfg, inv: inv, log: log, version: version, now: time.Now}
+func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version string) (*Server, error) {
+	s := &Server{cfg: cfg, inv: inv, deps: deps, log: log, version: version, now: time.Now}
 	s.sess = newSessions(cfg.Auth.SessionDuration.Duration, func() time.Time { return s.now() })
 	s.thr = newThrottle(func() time.Time { return s.now() })
-	funcs := template.FuncMap{"join": strings.Join}
+	funcs := template.FuncMap{
+		"join":  strings.Join,
+		"age":   func(t time.Time) string { return humanAge(s.now().Sub(t)) },
+		"clock": func(t time.Time) string { return t.Local().Format("15:04:05") },
+		"date":  func(t time.Time) string { return t.Local().Format("02/01/2006 15:04") },
+		"statusClass": func(st jobs.Status) string {
+			switch st {
+			case jobs.Success:
+				return "ok"
+			case jobs.Failed:
+				return "crit"
+			case jobs.Interrupted:
+				return "warn"
+			default:
+				return "run"
+			}
+		},
+	}
 	s.pages = map[string]*template.Template{}
-	for _, p := range []string{"connexion", "inventaire"} {
+	for _, p := range []string{"connexion", "inventaire", "invite", "taches", "tache"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+p+".html")
 		if err != nil {
 			return nil, fmt.Errorf("gabarit %s : %w", p, err)
@@ -67,6 +115,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /deconnexion", s.sameOrigin(s.authed(s.csrf(s.logout))))
 	mux.HandleFunc("GET /{$}", s.authed(s.inventoryPage))
 	mux.HandleFunc("POST /inventaire/rafraichir", s.sameOrigin(s.authed(s.csrf(s.refresh))))
+	mux.HandleFunc("POST /inventaire/detecter", s.sameOrigin(s.authed(s.csrf(s.detectAll))))
+	mux.HandleFunc("GET /invites/{node}/{vmid}", s.authed(s.guestPage))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/detecter", s.sameOrigin(s.authed(s.csrf(s.detectOne))))
+	mux.HandleFunc("GET /taches", s.authed(s.jobsPage))
+	mux.HandleFunc("GET /taches/{id}", s.authed(s.jobPage))
+	mux.HandleFunc("GET /taches/{id}/flux", s.authed(s.jobStream))
 	return securityHeaders(mux)
 }
 
@@ -149,8 +203,22 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+// base contient ce que le gabarit commun affiche sur chaque page.
+type base struct {
+	Title, User, CSRF, Version, Nav string
+}
+
+func (s *Server) base(title, nav string, se *session) base {
+	b := base{Title: title, Version: s.version, Nav: nav}
+	if se != nil {
+		b.User, b.CSRF = se.user, se.csrf
+	}
+	return b
+}
+
 type loginData struct {
-	Title, Error, Username, Version string
+	base
+	Error, Username string
 }
 
 func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) {
@@ -158,12 +226,12 @@ func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	s.render(w, "connexion", http.StatusOK, loginData{Title: "Connexion", Version: s.version})
+	s.render(w, "connexion", http.StatusOK, loginData{base: s.base("Connexion", "", nil)})
 }
 
 func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
-	data := loginData{Title: "Connexion", Version: s.version, Username: r.PostFormValue("username")}
+	data := loginData{base: s.base("Connexion", "", nil), Username: r.PostFormValue("username")}
 	if blocked, until := s.thr.blocked(ip); blocked {
 		data.Error = fmt.Sprintf("Trop d'essais. Réessayez après %s.", until.Format("15:04"))
 		s.render(w, "connexion", http.StatusTooManyRequests, data)
@@ -204,8 +272,41 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request, _ *session) {
 }
 
 type nodeGroup struct {
-	Node   string
-	Guests []inventory.Guest
+	Node string
+	Rows []row
+}
+
+// row est une ligne de l'inventaire : l'invité, sa dernière détection, sa
+// tâche en cours et les actions possibles.
+type row struct {
+	inventory.Guest
+	Det       *detect.Result
+	Active    *jobs.Job
+	CanDetect bool
+	Why       string
+}
+
+func (s *Server) rowFor(g inventory.Guest) row {
+	r := row{Guest: g}
+	t := jobs.Target{Node: g.Node, VMID: g.VMID}
+	if s.deps.Detections != nil {
+		if d, ok := s.deps.Detections.Get(t.Key()); ok {
+			r.Det = &d
+		}
+	}
+	if s.deps.Jobs != nil {
+		if j, ok := s.deps.Jobs.ActiveFor(t); ok {
+			r.Active = &j
+		}
+	}
+	if s.deps.Engine != nil {
+		if err := s.deps.Engine.CanDetect(g); err != nil {
+			r.Why = err.Error()
+		} else {
+			r.CanDetect = r.Active == nil
+		}
+	}
+	return r
 }
 
 type counts struct{ Total, LXC, VM, Running, CommunityScript, Critical int }
@@ -241,16 +342,17 @@ func (f filter) match(g inventory.Guest) bool {
 }
 
 type inventoryData struct {
-	Title, User, CSRF, Version string
-	Loaded, Refreshing         bool
-	Age, FetchedAt             string
-	Errors                     []string
-	Counts                     counts
-	Shown                      int
-	Groups                     []nodeGroup
-	Nodes, Tags                []string
-	Filter                     filter
-	Query                      string
+	base
+	Loaded, Refreshing bool
+	Detectable         int
+	Age, FetchedAt     string
+	Errors             []string
+	Counts             counts
+	Shown              int
+	Groups             []nodeGroup
+	Nodes, Tags        []string
+	Filter             filter
+	Query              string
 }
 
 func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *session) {
@@ -258,7 +360,7 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 	q := r.URL.Query()
 	f := filter{Node: q.Get("noeud"), Type: q.Get("type"), Tag: q.Get("tag"), Q: strings.TrimSpace(q.Get("q"))}
 	d := inventoryData{
-		Title: "Inventaire", User: se.user, CSRF: se.csrf, Version: s.version,
+		base:   s.base("Inventaire", "inventaire", se),
 		Loaded: !snap.FetchedAt.IsZero(), Refreshing: refreshing,
 		Nodes: snap.Nodes(), Filter: f, Query: r.URL.RawQuery,
 	}
@@ -292,6 +394,10 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 		if g.Critical {
 			d.Counts.Critical++
 		}
+		rw := s.rowFor(g)
+		if rw.CanDetect {
+			d.Detectable++
+		}
 		if !f.match(g) {
 			continue
 		}
@@ -301,7 +407,7 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 			ng = &nodeGroup{Node: g.Node}
 			groups[g.Node] = ng
 		}
-		ng.Guests = append(ng.Guests, g)
+		ng.Rows = append(ng.Rows, rw)
 	}
 	for _, n := range d.Nodes {
 		if ng, ok := groups[n]; ok {

@@ -11,16 +11,26 @@ de mémoire, sans agent dans les invités.
 | :--- | :--- | :--- |
 | 0 | Sonde de vérification des hypothèses (`tools/sonde.sh`) | ✅ |
 | 1 | Configuration, authentification, inventaire de tous les nœuds via l'API (lecture seule) | ✅ |
-| 2 | Wrapper SSH sur les nœuds, tâches asynchrones, journaux en direct, historique | à faire |
-| 3 | Prototype de bout en bout sur un LXC : détection apt + appli, simulation, « Tout mettre à jour » | à faire |
+| 2 | Wrapper SSH sur les nœuds, tâches asynchrones, journaux en direct, historique, **détection** (apt, appli community-scripts, dernière version, changelog) | ✅ |
+| 3 | Mises à jour d'un LXC : simulation, « Sécurité uniquement », « Tout mettre à jour », confirmation | à faire |
 | 4 et + | « Sécurité uniquement », lots, VMs, Docker, snapshots | à faire |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
 
-**Ce que fait la version actuelle :** elle lit l'inventaire (LXC et VM de tous les nœuds,
-état, tags) et repère les LXC community-scripts et les invités à confirmation renforcée
-(tag `critique`, OMV, PBS). **Elle ne peut encore rien modifier** : le jeton utilisé est en
-lecture seule et aucun accès SSH n'est configuré.
+**Ce que fait la version actuelle :**
+
+- inventaire de tous les nœuds (LXC et VM, état, tags), avec repérage des LXC
+  community-scripts et des invités à confirmation renforcée (tag `critique`, OMV, PBS) ;
+- **détection** dans les LXC démarrés, par invité ou en lot : mises à jour apt (sécurité,
+  autres, ce qu'installerait « Sécurité uniquement »), appli community-scripts (version
+  installée, dernière version publiée, lien vers le changelog et la page du script),
+  questions que le script poserait sans terminal, CPU/RAM exigés, disque, redémarrage requis ;
+- tâches en arrière-plan (une seule à la fois par invité), journal complet en direct,
+  historique conservé.
+
+**Elle n'installe encore rien.** La détection lance seulement `apt-get update` dans les
+invités, pour rafraîchir l'index des paquets (désactivable : `detection.apt_refresh`). Les
+VM, Docker et les actions de mise à jour arrivent dans les jalons suivants.
 
 ## Installation
 
@@ -113,17 +123,90 @@ journalctl -u patchwarden -f
 L'interface répond sur `http://<IP du LXC>:8080`. Pour la servir en HTTPS, placez-la
 derrière votre proxy interne (NginxUI) et mettez `cookie_secure = true`.
 
+### 6. Ouvrir l'accès aux nœuds (détection)
+
+Sans cette étape, PatchWarden reste en lecture seule. La clé SSH dédiée ne peut lancer
+**qu'une seule commande** sur les nœuds, le wrapper [`deploy/patchwarden-wrapper`](deploy/patchwarden-wrapper),
+et seulement depuis l'IP de PatchWarden.
+
+**Sur chaque nœud** (LOKI, TYR, ODIN), en root :
+
+```bash
+install -m 755 patchwarden-wrapper /usr/local/sbin/patchwarden-wrapper
+```
+
+**Dans le LXC PatchWarden** :
+
+```bash
+patchwarden ssh-keygen -key /etc/patchwarden/id_ed25519 -from <IP du LXC PatchWarden>
+chown patchwarden:patchwarden /etc/patchwarden/id_ed25519
+```
+
+La commande affiche la ligne à ajouter, telle quelle, dans `/root/.ssh/authorized_keys`
+des nœuds :
+
+```
+command="/usr/local/sbin/patchwarden-wrapper",from="192.168.0.20",restrict ssh-ed25519 AAAA… patchwarden
+```
+
+En cluster, `/root/.ssh/authorized_keys` est en général un lien vers
+`/etc/pve/priv/authorized_keys`, partagé par tous les nœuds (`ls -l /root/.ssh/authorized_keys`
+pour le vérifier). Il suffit alors d'ajouter la ligne une fois. Sinon, ajoutez-la sur chaque nœud.
+
+Clés d'hôte des nœuds, toujours vérifiées (`apt install openssh-client` dans le LXC) :
+
+```bash
+ssh-keyscan -t ed25519 192.168.0.141 192.168.0.43 192.168.0.49 > /etc/patchwarden/known_hosts
+ssh-keygen -lf /etc/patchwarden/known_hosts          # empreintes reçues…
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub     # …à comparer, sur chaque nœud
+chmod 640 /etc/patchwarden/known_hosts && chgrp patchwarden /etc/patchwarden/known_hosts
+```
+
+Déclarez ensuite les nœuds dans la section `[ssh]` de `config.toml`, puis vérifiez :
+
+```bash
+patchwarden check-config
+#   Nœuds SSH (wrapper) :
+#     ✔ loki : pw.wrapper_version=1 pw.node=loki pw.pve=pve-manager/8.4.21/…
+```
+
+Contrôle manuel du verrouillage, depuis le LXC PatchWarden :
+
+```bash
+ssh -i /etc/patchwarden/id_ed25519 root@192.168.0.141 ping      # répond
+ssh -i /etc/patchwarden/id_ed25519 root@192.168.0.141 'ls /'    # PW-REFUS, code 2
+```
+
+Chaque appel au wrapper est journalisé sur le nœud : `journalctl -t patchwarden`.
+
 ### Mettre à jour PatchWarden
 
 Remplacez `/usr/local/bin/patchwarden`, puis `systemctl restart patchwarden`. Les sessions
-sont gardées en mémoire : il faudra se reconnecter.
+sont gardées en mémoire : il faudra se reconnecter. Une tâche en cours au moment du
+redémarrage est marquée « interrompue » dans l'historique. Si une nouvelle version change
+le wrapper, réinstallez-le sur les nœuds : `check-config` affiche la version installée.
 
 ## Droits nécessaires (moindre privilège)
 
 | Accès | Utilisé pour | Droits | Depuis |
 | :--- | :--- | :--- | :--- |
 | Jeton API `patchwarden@pve!inventaire` | Inventaire | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
-| Clé SSH vers root des nœuds, **commande forcée** | `pct exec`, `qm guest exec`, snapshots | Une seule commande possible (le wrapper), depuis la seule IP de PatchWarden, sans terminal ni redirection | Jalon 2 (pas encore) |
+| Clé SSH vers root des nœuds, **commande forcée** | Verbes du wrapper | Une seule commande possible (le wrapper), depuis la seule IP de PatchWarden, `restrict` : ni terminal, ni redirection de ports, ni agent | Jalon 2 |
+| Jeton GitHub (facultatif) | Dernières versions des applis | Aucun droit : lecture des dépôts publics | Jalon 2 |
+
+Le wrapper n'accepte qu'un vocabulaire fixe ; tout le reste est refusé (code 2) et journalisé.
+Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. PatchWarden
+n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
+le wrapper, relisible sur le nœud.
+
+| Verbe (wrapper v1) | Effet dans l'invité |
+| :--- | :--- |
+| `ping` | Aucun (version du wrapper, nom du nœud) |
+| `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
+| `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
+
+Les verbes de mise à jour (`apt`, `update` community-scripts, snapshots) viendront au jalon 3,
+avec la même règle : un verbe par action, rien d'arbitraire.
 
 ## Sécurité
 
@@ -133,7 +216,12 @@ sont gardées en mémoire : il faudra se reconnecter.
 - Un seul compte, mot de passe haché en bcrypt, comparaison en temps constant.
   Blocage de 15 minutes après 5 échecs pour une même IP.
 - Cookie de session `HttpOnly` et `SameSite=Strict`, jeton CSRF et contrôle de l'origine
-  sur chaque formulaire, en-têtes CSP stricts, aucun JavaScript pour l'instant.
+  sur chaque formulaire, en-têtes CSP stricts. Le seul JavaScript (`tache.js`, servi par
+  PatchWarden) affiche le journal en direct.
+- Clés d'hôte SSH toujours vérifiées ; une clé différente de celle enregistrée bloque la connexion.
+- Les scripts community-scripts ne sont lus que depuis les sources autorisées
+  (`community_scripts.allowed_bases`) : un invité compromis ne peut pas faire télécharger
+  une URL de son choix à PatchWarden.
 - Le fichier de configuration est refusé en cas de clé inconnue, et signalé s'il est lisible par tous.
 - Service systemd durci : utilisateur dédié, système en lecture seule, mémoire plafonnée à 256 Mo.
 
@@ -151,7 +239,14 @@ make build
 | `internal/config` | Lecture et validation de la configuration |
 | `internal/proxmox` | Client API en lecture seule, épinglage TLS |
 | `internal/inventory` | Fusion des points d'accès, classification, rafraîchissement en arrière-plan |
-| `internal/web` | Interface : sessions, CSRF, pages, gabarits embarqués |
+| `internal/sshx` | Exécution SSH vers le wrapper (known_hosts, flux ligne à ligne) |
+| `internal/jobs` | Tâches : une par invité, limite globale, journal sur disque, diffusion en direct |
+| `internal/detect` | Lecture de la sortie de détection, dernier résultat par invité |
+| `internal/cs` | Analyse des scripts community-scripts (applis suivies, exigences, questions) |
+| `internal/upstream` | Dernières versions sur GitHub, Codeberg, GitLab (avec cache) |
+| `internal/engine` | Assemble le tout : construit le travail de chaque tâche |
+| `internal/web` | Interface : sessions, CSRF, pages, journal en direct (SSE), gabarits embarqués |
+| `deploy/patchwarden-wrapper` | Wrapper à installer sur les nœuds |
 | `tools/sonde.sh` | Sonde de diagnostic à lancer sur un nœud (lecture seule) |
 
 ## La sonde (jalon 0)

@@ -1,0 +1,30 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Tâches</h1>
+    <p class="muted">{{if .RunningOrQueued}}{{.RunningOrQueued}} en cours ou en attente · {{end}}les 200 plus récentes</p>
+  </div>
+  <a class="btn" href="/taches">Actualiser</a>
+</div>
+{{if .Started}}<p class="alert alert-info">{{.Started}} détection(s) lancée(s){{if ne .Skipped "0"}}, {{.Skipped}} invité(s) ignoré(s) (arrêtés, VM, modèles, nœud sans SSH ou tâche déjà en cours){{end}}.</p>{{end}}
+{{if .Jobs}}
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Date</th><th>Invité</th><th>Tâche</th><th>Statut</th><th>Durée</th><th>Résumé</th><th>Par</th></tr></thead>
+  <tbody>
+  {{range .Jobs}}
+  <tr>
+    <td><a href="/taches/{{.ID}}">{{date .CreatedAt}}</a></td>
+    <td><a href="/invites/{{.Target.Node}}/{{.Target.VMID}}">{{.Target.Name}}</a> <span class="muted small">{{.Target.Node}}/{{.Target.VMID}}</span></td>
+    <td>{{.Kind}}{{if .DryRun}} (simulation){{end}}</td>
+    <td><span class="badge badge-{{statusClass .Status}}">{{.Status}}</span></td>
+    <td class="num">{{if not .StartedAt.IsZero}}{{.Duration}}{{end}}</td>
+    <td>{{if .Error}}<span class="crit">{{.Error}}</span>{{else}}{{.Summary}}{{end}}</td>
+    <td class="muted">{{.RequestedBy}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="muted">Aucune tâche pour l'instant.</p>{{end}}
+{{end}}

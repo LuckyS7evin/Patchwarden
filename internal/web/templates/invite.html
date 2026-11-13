@@ -1,0 +1,122 @@
+{{define "content"}}
+{{with .Row}}
+<p class="crumbs"><a href="/">Inventaire</a> › {{.Node}}</p>
+<div class="pagehead">
+  <div>
+    <h1>{{.Name}} <span class="muted">· {{.TypeLabel}} {{.VMID}}</span></h1>
+    <p>
+      <span class="status status-{{.Status}}">{{if eq .Status "running"}}démarré{{else if eq .Status "stopped"}}arrêté{{else}}{{.Status}}{{end}}</span>
+      {{if .CommunityScript}}<span class="badge badge-cs">community-scripts</span>{{end}}
+      {{if .Critical}}<span class="badge badge-crit">confirmation renforcée ({{.CriticalReason}})</span>{{end}}
+      {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
+    </p>
+  </div>
+  <div class="actions">
+    {{if .Active}}<a class="btn" href="/taches/{{.Active.ID}}">Tâche en cours : {{.Active.Kind}}</a>
+    {{else if .CanDetect}}
+    <form method="post" action="/invites/{{.Node}}/{{.VMID}}/detecter">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button type="submit" class="btn btn-primary" title="Lecture seule">Détecter les mises à jour</button>
+    </form>
+    {{else if .Why}}<span class="muted small">Détection indisponible : {{.Why}}</span>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+
+{{with .Row.Det}}
+<section class="card">
+  <h2>Dernière détection <span class="muted">· {{age .At}} ({{date .At}}) · <a href="/taches/{{.JobID}}">journal</a></span></h2>
+  <dl class="facts">
+    <dt>Système</dt><dd>{{.OSPretty}}</dd>
+    <dt>Ressources</dt><dd>{{.Nproc}} CPU · {{.MemMB}} Mo</dd>
+    <dt>Disque /</dt><dd>{{.RootUsedPct}} % utilisé{{if ge .RootUsedPct 75}} <span class="badge badge-warn">le moteur community-scripts refuse de mettre à jour au-delà de 80 %</span>{{end}}</dd>
+    <dt>Redémarrage</dt><dd>{{if .RebootRequired}}<span class="badge badge-warn">requis</span>{{else}}non requis{{end}}</dd>
+    {{if .Docker}}<dt>Docker</dt><dd>{{.Containers}} conteneur(s) — suivi détaillé dans un prochain jalon</dd>{{end}}
+  </dl>
+</section>
+
+{{if .CS.Present}}
+<section class="card">
+  <h2>Application community-scripts</h2>
+  <dl class="facts">
+    <dt>Script</dt><dd>
+      {{if .CS.ScriptURL}}<a href="{{.CS.ScriptURL}}" target="_blank" rel="noopener noreferrer">ct/{{.CS.Script}}.sh</a>{{else}}ct/{{.CS.Script}}.sh{{end}}
+      {{if .CS.PageURL}} · <a href="{{.CS.PageURL}}" target="_blank" rel="noopener noreferrer">page du script</a>{{end}}
+      · entrée <code>update</code> : {{if eq .CS.Entry "helper"}}format actuel{{else if eq .CS.Entry "legacy"}}ancien format (migré au prochain update){{else}}{{.CS.Entry}}{{end}}
+    </dd>
+    {{if .CS.Error}}<dt>Problème</dt><dd class="crit">{{.CS.Error}}</dd>{{end}}
+    {{if .CS.NeedCPU}}<dt>Exigé par le script</dt><dd>{{.CS.NeedCPU}} CPU · {{.CS.NeedRAMMB}} Mo
+      {{if or (lt .Nproc .CS.NeedCPU) (lt .MemMB .CS.NeedRAMMB)}} <span class="badge badge-warn">supérieur au CT : augmentation temporaire nécessaire pour la mise à jour</span>{{end}}</dd>{{end}}
+    {{if .CS.OSOnly}}<dt>Portée</dt><dd>le script ne met à jour que l'OS (apt), pas l'application</dd>{{end}}
+    {{if .CS.Prompts}}<dt>Questions sans terminal</dt><dd>{{range .CS.Prompts}}<span class="badge badge-crit">« {{.}} »</span> {{end}}<br><span class="muted small">Une réponse devra être enregistrée pour cet invité avant toute mise à jour de l'application.</span></dd>{{end}}
+  </dl>
+  {{if .Apps}}
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Application</th><th>Installée</th><th>Dernière</th><th>État</th><th>Changelog</th></tr></thead>
+    <tbody>
+    {{range .Apps}}
+    <tr>
+      <td>{{.Name}} <span class="muted small">{{.Repo}}</span></td>
+      <td><code>{{if .Installed}}{{.Installed}}{{else}}?{{end}}</code></td>
+      <td><code>{{if .Latest}}{{.Latest}}{{else}}?{{end}}</code>{{if .LatestError}}<br><span class="muted small">{{.LatestError}}</span>{{end}}</td>
+      <td>{{if .UpdateAvailable}}<span class="badge badge-warn">mise à jour disponible</span>{{else if eq .Status "à jour"}}<span class="badge badge-ok">à jour</span>{{else}}<span class="badge">inconnue</span>{{end}}</td>
+      <td>{{if .ChangelogURL}}<a href="{{.ChangelogURL}}" target="_blank" rel="noopener noreferrer">ouvrir</a>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{end}}
+</section>
+{{end}}
+
+{{if .Apt.Present}}
+<section class="card">
+  <h2>Paquets apt</h2>
+  <p>
+    {{if .Apt.Total}}<strong>{{.Apt.Total}}</strong> mise(s) à jour, dont <strong>{{.Apt.Security}}</strong> de sécurité.
+    « Sécurité uniquement » installerait <strong>{{.Apt.SecurityStrict}}</strong> paquet(s).
+    {{else}}Aucune mise à jour apt.{{end}}
+    {{if ge .Apt.IndexAgeHours 0}}<span class="muted small">Index apt rafraîchi il y a {{.Apt.IndexAgeHours}} h.</span>{{end}}
+  </p>
+  {{if gt $.StrictMissing 0}}<p class="alert alert-warn">{{$.StrictMissing}} correctif(s) de sécurité ne passent pas seuls (dépendance hors dépôt de sécurité) : « Tout mettre à jour » les installera.</p>{{end}}
+  {{if not .Apt.SecurityRepo}}<p class="alert alert-warn">Aucun dépôt de sécurité configuré dans cet invité : « Sécurité uniquement » n'aura aucun effet.</p>{{end}}
+  {{range .Apt.RefreshErrors}}<p class="alert alert-error">apt-get update : {{.}}</p>{{end}}
+  {{if $.SecurityPkgs}}
+  <details open><summary>Sécurité ({{len $.SecurityPkgs}})</summary>
+    <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th></tr></thead><tbody>
+    {{range $.SecurityPkgs}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td></tr>{{end}}
+    </tbody></table></div>
+  </details>
+  {{end}}
+  {{if $.OtherPkgs}}
+  <details><summary>Autres ({{len $.OtherPkgs}})</summary>
+    <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th></tr></thead><tbody>
+    {{range $.OtherPkgs}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td></tr>{{end}}
+    </tbody></table></div>
+  </details>
+  {{end}}
+</section>
+{{end}}
+{{else}}
+<p class="muted">Aucune détection pour cet invité.</p>
+{{end}}
+
+<section class="card">
+  <h2>Historique</h2>
+  {{if .Jobs}}
+  <div class="tablewrap"><table>
+    <thead><tr><th>Date</th><th>Tâche</th><th>Statut</th><th>Résumé</th></tr></thead>
+    <tbody>
+    {{range .Jobs}}
+    <tr><td><a href="/taches/{{.ID}}">{{date .CreatedAt}}</a></td><td>{{.Kind}}{{if .DryRun}} (simulation){{end}}</td>
+      <td><span class="badge badge-{{statusClass .Status}}">{{.Status}}</span></td><td>{{if .Error}}<span class="crit">{{.Error}}</span>{{else}}{{.Summary}}{{end}}</td></tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{else}}<p class="muted">Aucune tâche.</p>{{end}}
+</section>
+{{end}}

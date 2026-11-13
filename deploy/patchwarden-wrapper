@@ -1,0 +1,210 @@
+#!/bin/bash
+# ==============================================================================
+# PatchWarden - wrapper des nœuds Proxmox
+# ==============================================================================
+# Seule commande que la clé SSH de PatchWarden peut lancer sur un nœud :
+#
+#   command="/usr/local/sbin/patchwarden-wrapper",from="<IP PatchWarden>",restrict ssh-ed25519 AAAA… patchwarden
+#
+# La commande demandée par PatchWarden arrive dans SSH_ORIGINAL_COMMAND. Elle
+# doit appartenir au petit vocabulaire ci-dessous ; tout le reste est refusé
+# et journalisé (journalctl -t patchwarden). Les scripts exécutés dans les
+# invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
+# et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
+#
+# Verbes (version 1) :
+#   ping                              version du wrapper et nom du nœud
+#   lxc-detect <vmid> <0|1>           détection dans un LXC démarré (1 = apt-get update avant)
+#   lxc-versions <vmid> <app>...      contenu des fichiers /root/.<app> (versions community-scripts)
+#
+# Codes de sortie : 0 succès, 2 requête refusée, 3 invité non démarré,
+# autre : code renvoyé par la commande exécutée dans l'invité.
+# ==============================================================================
+
+set -uo pipefail
+set -f
+export LC_ALL=C
+WRAPPER_VERSION=1
+NODE="$(hostname)"
+CMD="${SSH_ORIGINAL_COMMAND:-}"
+TIMEOUT_DETECT=900
+# Racine de pmxcfs. Modifiable uniquement pour les tests : un client SSH ne peut
+# pas transmettre cette variable (sshd n'accepte par défaut que LANG et LC_*).
+PVE_DIR="${PATCHWARDEN_PVE_DIR:-/etc/pve}"
+
+log() { logger -t patchwarden -- "$*" 2>/dev/null || true; }
+refuse() {
+	echo "PW-REFUS: $*" >&2
+	log "refus : $* (commande : ${CMD:0:200})"
+	exit 2
+}
+
+# Caractères autorisés : lettres, chiffres, point, tiret, soulignement, espace.
+[[ "$CMD" =~ ^[A-Za-z0-9._\ -]{1,512}$ ]] || refuse "commande vide ou caractères non autorisés"
+read -r -a ARGS <<<"$CMD"
+VERB="${ARGS[0]:-}"
+[[ -n "$VERB" ]] || refuse "commande vide"
+
+# Vérifie qu'un CT existe sur CE nœud et qu'il est démarré.
+check_ct() {
+	local vmid="$1" status
+	[[ "$vmid" =~ ^[1-9][0-9]{1,8}$ ]] || refuse "VMID invalide : $vmid"
+	[[ -f "${PVE_DIR}/nodes/${NODE}/lxc/${vmid}.conf" ]] || refuse "CT ${vmid} absent du nœud ${NODE}"
+	status="$(pct status "$vmid" 2>/dev/null)"
+	if [[ "$status" != "status: running" ]]; then
+		echo "PW-ARRETE: CT ${vmid} non démarré (${status:-état inconnu})" >&2
+		exit 3
+	fi
+}
+
+# ------------------------------------------------------------------------------
+# Script de détection exécuté DANS le LXC (POSIX sh, sortie clé=valeur).
+# Lecture seule, sauf `apt-get update` si demandé (rafraîchit l'index apt).
+# ------------------------------------------------------------------------------
+read -r -d '' DETECT <<'DETECT_EOF'
+REFRESH="${1:-0}"
+export LC_ALL=C DEBIAN_FRONTEND=noninteractive
+kv() { printf '%s=%s\n' "$1" "$(printf '%s' "$2" | tr -d '\r\n')"; }
+has() { command -v "$1" >/dev/null 2>&1; }
+
+kv pw.detect 1
+if [ -r /etc/os-release ]; then . /etc/os-release; fi
+kv os.id "${ID:-inconnu}"
+kv os.version_id "${VERSION_ID:-}"
+kv os.pretty "${PRETTY_NAME:-}"
+kv sys.nproc "$(nproc 2>/dev/null || echo 0)"
+kv sys.mem_mb "$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null)"
+kv sys.root_used_pct "$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
+if [ -e /var/run/reboot-required ]; then kv sys.reboot_required 1; else kv sys.reboot_required 0; fi
+
+if [ -f /usr/bin/update ]; then
+	name="$(sed -n 's/^export UPDATE_SCRIPT_NAME="\{0,1\}\([A-Za-z0-9._-]*\).*/\1/p' /usr/bin/update | head -n 1)"
+	slug="$(sed -n 's/^export SCRIPT_SLUG="\{0,1\}\([A-Za-z0-9._-]*\).*/\1/p' /usr/bin/update | head -n 1)"
+	base="$(sed -n 's/^export COMMUNITY_SCRIPTS_URL="\{0,1\}\([^"]*\).*/\1/p' /usr/bin/update | head -n 1)"
+	if [ -n "$name" ]; then
+		entry=helper
+	else
+		url="$(grep -o 'https\{0,1\}://[^"]*/ct/[A-Za-z0-9._-]*\.sh' /usr/bin/update | head -n 1)"
+		if [ -n "$url" ]; then
+			entry=legacy
+			name="$(basename "$url" .sh)"
+			base="${url%/ct/*}"
+		else
+			entry=inconnu
+		fi
+	fi
+	kv cs.entry "$entry"
+	kv cs.script "$name"
+	kv cs.slug "${slug:-$name}"
+	kv cs.base "$base"
+else
+	kv cs.entry aucune
+fi
+
+if has apt-get; then
+	kv apt.present 1
+	if [ "$REFRESH" = 1 ]; then
+		apt-get update -q >/tmp/.pw-apt-update.log 2>&1
+		rc=$?
+		kv apt.refresh_rc "$rc"
+		if [ "$rc" != 0 ]; then
+			grep -E '^(E|W):' /tmp/.pw-apt-update.log | tail -n 3 | while IFS= read -r l; do kv apt.refresh_err "$l"; done
+		fi
+		rm -f /tmp/.pw-apt-update.log
+	fi
+	newest="$(find /var/lib/apt/lists -maxdepth 1 -type f -name '*Release' -printf '%T@\n' 2>/dev/null | sort -n | tail -n 1)"
+	if [ -n "$newest" ]; then kv apt.index_age_h "$(( ($(date +%s) - ${newest%.*}) / 3600 ))"; fi
+
+	# Une ligne par paquet : nom, version installée (- si nouveau), nouvelle version, 1 si sécurité.
+	apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | awk '
+		/^Inst / {
+			name = $2; old = "-"
+			if ($3 ~ /^\[/) { old = $3; gsub(/\[|\]/, "", old) }
+			p = index($0, "("); inner = substr($0, p + 1)
+			q = index(inner, ")"); if (q > 0) inner = substr(inner, 1, q - 1)
+			split(inner, a, " ")
+			sec = (inner ~ /-security|Security:/) ? 1 : 0
+			n++; s += sec
+			print "apt.pkg=" name " " old " " a[1] " " sec
+		}
+		END { print "apt.total=" n + 0; print "apt.security=" s + 0 }'
+	kv apt.upgrade_simple "$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst ')"
+
+	# Simulation « sécurité seule » stricte : uniquement les dépôts *-security.
+	tmp="$(mktemp -d /tmp/.pw-detect.XXXXXX)"
+	mkdir -p "$tmp/parts"
+	grep -hsE '^[[:space:]]*deb[[:space:]].*-security' /etc/apt/sources.list /etc/apt/sources.list.d/*.list >"$tmp/sources.list"
+	for f in /etc/apt/sources.list.d/*.sources; do
+		[ -f "$f" ] || continue
+		awk 'BEGIN { RS = ""; ORS = "" }
+			{ n = split($0, L, "\n"); out = ""; keep = 0; off = 0
+			  for (i = 1; i <= n; i++) {
+			    if (L[i] ~ /^Enabled:[ \t]*no/) off = 1
+			    if (L[i] ~ /^Suites:/) { m = split(L[i], W, /[ \t]+/); s = "Suites:"
+			      for (j = 2; j <= m; j++) if (W[j] ~ /-security$/) { s = s " " W[j]; keep = 1 }
+			      L[i] = s }
+			    out = out L[i] "\n" }
+			  if (keep && !off) print out "\n" }' "$f" >"$tmp/parts/$(basename "$f")"
+	done
+	if [ -s "$tmp/sources.list" ] || [ -n "$(cat "$tmp"/parts/* 2>/dev/null)" ]; then
+		kv apt.security_repo 1
+		apt-get -s -o Debug::NoLocking=1 -o Dir::Etc::SourceList="$tmp/sources.list" \
+			-o Dir::Etc::SourceParts="$tmp/parts" dist-upgrade 2>/dev/null |
+			awk '/^Inst / { n++; print "apt.strict_pkg=" $2 } END { print "apt.security_strict=" n + 0 }'
+	else
+		kv apt.security_repo 0
+	fi
+	rm -rf "$tmp"
+else
+	kv apt.present 0
+fi
+
+if has docker && docker info >/dev/null 2>&1; then
+	kv docker.present 1
+	kv docker.containers "$(docker ps -aq 2>/dev/null | wc -l)"
+else
+	kv docker.present 0
+fi
+kv pw.end 1
+DETECT_EOF
+
+# Lecture des fichiers de version community-scripts (/root/.<app>).
+read -r -d '' VERSIONS <<'VERSIONS_EOF'
+for n in "$@"; do
+	f="/root/.$n"
+	if [ -f "$f" ]; then
+		printf 'version.%s=%s\n' "$n" "$(head -n 1 "$f" | tr -d '\r' | cut -c1-120 | tr -cd '[:print:]')"
+	else
+		printf 'version_absent.%s=1\n' "$n"
+	fi
+done
+VERSIONS_EOF
+
+case "$VERB" in
+ping)
+	[[ ${#ARGS[@]} -eq 1 ]] || refuse "ping ne prend pas d'argument"
+	echo "pw.wrapper_version=${WRAPPER_VERSION}"
+	echo "pw.node=${NODE}"
+	echo "pw.pve=$(pveversion 2>/dev/null | head -n 1)"
+	;;
+lxc-detect)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-detect <vmid> <0|1>"
+	[[ "${ARGS[2]}" =~ ^[01]$ ]] || refuse "rafraîchissement attendu : 0 ou 1"
+	check_ct "${ARGS[1]}"
+	log "lxc-detect ${ARGS[1]} refresh=${ARGS[2]}"
+	timeout "$TIMEOUT_DETECT" pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[2]}" <<<"$DETECT"
+	exit $?
+	;;
+lxc-versions)
+	[[ ${#ARGS[@]} -ge 3 && ${#ARGS[@]} -le 12 ]] || refuse "usage : lxc-versions <vmid> <app> (1 à 10 noms)"
+	for n in "${ARGS[@]:2}"; do
+		[[ "$n" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] || refuse "nom d'appli invalide : $n"
+	done
+	check_ct "${ARGS[1]}"
+	timeout 60 pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[@]:2}" <<<"$VERSIONS"
+	exit $?
+	;;
+*)
+	refuse "verbe inconnu : ${VERB}"
+	;;
+esac

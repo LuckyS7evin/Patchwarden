@@ -43,6 +43,61 @@ type Config struct {
 	Proxmox   []Endpoint `toml:"proxmox"`
 	Policy    Policy     `toml:"policy"`
 	Inventory Inventory  `toml:"inventory"`
+	SSH       SSH        `toml:"ssh"`
+	Jobs      Jobs       `toml:"jobs"`
+	Detection Detection  `toml:"detection"`
+	CS        CS         `toml:"community_scripts"`
+	Upstream  Upstream   `toml:"upstream"`
+}
+
+// SSH règle l'accès aux nœuds (wrapper à commande forcée). Sans nœud déclaré,
+// PatchWarden reste en lecture seule : aucune détection ni action.
+type SSH struct {
+	User           string   `toml:"user"`
+	KeyFile        string   `toml:"key_file"`
+	KnownHosts     string   `toml:"known_hosts"`
+	ConnectTimeout Duration `toml:"connect_timeout"`
+	// Nodes associe le nom du nœud Proxmox à son adresse SSH (hôte ou hôte:port).
+	Nodes map[string]string `toml:"nodes"`
+}
+
+// Enabled indique si l'accès SSH est configuré.
+func (s SSH) Enabled() bool { return len(s.Nodes) > 0 }
+
+// Jobs règle l'exécution des tâches.
+type Jobs struct {
+	// DataDir contient l'historique des tâches et l'état de la détection.
+	DataDir string `toml:"data_dir"`
+	// MaxParallel limite le nombre de tâches simultanées (une seule par invité, toujours).
+	MaxParallel int `toml:"max_parallel"`
+	// Retention : nombre de tâches gardées dans l'historique.
+	Retention int `toml:"retention"`
+}
+
+// Detection règle la détection des mises à jour.
+type Detection struct {
+	// AptRefresh lance `apt-get update` avant la simulation (index souvent vieux de plusieurs semaines).
+	AptRefresh *bool    `toml:"apt_refresh"`
+	Timeout    Duration `toml:"timeout"`
+}
+
+// CS règle l'usage des scripts community-scripts.
+type CS struct {
+	// AllowedBases : seules sources de scripts que PatchWarden accepte de lire.
+	// La base vient de l'invité ; la restreindre évite qu'un invité compromis
+	// fasse télécharger n'importe quelle URL à PatchWarden.
+	AllowedBases []string `toml:"allowed_bases"`
+	WebsiteURL   string   `toml:"website_url"`
+}
+
+// Upstream règle l'interrogation des forges (dernières versions).
+type Upstream struct {
+	// Jeton GitHub facultatif en lecture seule (sinon 60 requêtes/heure).
+	GitHubToken    string `toml:"github_token"`
+	GitHubTokenEnv string `toml:"github_token_env"`
+	// GitHubAPI : base de l'API (à changer seulement pour GitHub Enterprise).
+	GitHubAPI string   `toml:"github_api"`
+	CacheTTL  Duration `toml:"cache_ttl"`
 }
 
 // Server règle le serveur HTTP.
@@ -153,6 +208,45 @@ func (c *Config) applyDefaults() {
 	if c.Inventory.Timeout.Duration == 0 {
 		c.Inventory.Timeout.Duration = 15 * time.Second
 	}
+	if c.SSH.User == "" {
+		c.SSH.User = "root"
+	}
+	if c.SSH.ConnectTimeout.Duration == 0 {
+		c.SSH.ConnectTimeout.Duration = 10 * time.Second
+	}
+	for n, a := range c.SSH.Nodes {
+		if _, _, err := net.SplitHostPort(a); err != nil {
+			c.SSH.Nodes[n] = net.JoinHostPort(a, "22")
+		}
+	}
+	if c.Jobs.DataDir == "" {
+		c.Jobs.DataDir = "/var/lib/patchwarden"
+	}
+	if c.Jobs.MaxParallel == 0 {
+		c.Jobs.MaxParallel = 2
+	}
+	if c.Jobs.Retention == 0 {
+		c.Jobs.Retention = 500
+	}
+	if c.Detection.AptRefresh == nil {
+		t := true
+		c.Detection.AptRefresh = &t
+	}
+	if c.Detection.Timeout.Duration == 0 {
+		c.Detection.Timeout.Duration = 15 * time.Minute
+	}
+	if c.CS.AllowedBases == nil {
+		c.CS.AllowedBases = []string{"https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main"}
+	}
+	if c.CS.WebsiteURL == "" {
+		c.CS.WebsiteURL = "https://community-scripts.org"
+	}
+	if c.Upstream.GitHubAPI == "" {
+		c.Upstream.GitHubAPI = "https://api.github.com"
+	}
+	if c.Upstream.CacheTTL.Duration == 0 {
+		c.Upstream.CacheTTL.Duration = 6 * time.Hour
+	}
 }
 
 // resolveSecrets remplit TokenSecret depuis l'environnement quand c'est demandé.
@@ -169,6 +263,12 @@ func (c *Config) resolveSecrets(getenv func(string) string) error {
 		if ep.TokenSecret == "" {
 			return fmt.Errorf("proxmox %q : la variable d'environnement %s est vide ou absente", ep.Name, ep.TokenSecretEnv)
 		}
+	}
+	if c.Upstream.GitHubTokenEnv != "" {
+		if c.Upstream.GitHubToken != "" {
+			return errors.New("upstream : github_token et github_token_env sont exclusifs")
+		}
+		c.Upstream.GitHubToken = getenv(c.Upstream.GitHubTokenEnv)
 	}
 	return nil
 }
@@ -236,6 +336,40 @@ func (c *Config) Validate() error {
 	}
 	if c.Inventory.Timeout.Duration <= 0 {
 		add("inventory.timeout doit être positif")
+	}
+	if c.SSH.Enabled() {
+		if c.SSH.KeyFile == "" {
+			add("ssh.key_file est obligatoire (générez la clé avec : patchwarden ssh-keygen)")
+		} else if _, err := os.Stat(c.SSH.KeyFile); err != nil {
+			add("ssh.key_file illisible : %v", err)
+		}
+		if c.SSH.KnownHosts == "" {
+			add("ssh.known_hosts est obligatoire : les clés d'hôte des nœuds sont toujours vérifiées")
+		} else if _, err := os.Stat(c.SSH.KnownHosts); err != nil {
+			add("ssh.known_hosts illisible : %v", err)
+		}
+		for n, a := range c.SSH.Nodes {
+			if !nameRe.MatchString(n) {
+				add("ssh.nodes : nom de nœud invalide %q (minuscules, chiffres, tirets)", n)
+			}
+			if h, p, err := net.SplitHostPort(a); err != nil || h == "" || p == "" {
+				add("ssh.nodes.%s : adresse invalide %q", n, a)
+			}
+		}
+	}
+	if c.Jobs.MaxParallel < 1 || c.Jobs.MaxParallel > 16 {
+		add("jobs.max_parallel doit être compris entre 1 et 16")
+	}
+	if c.Jobs.Retention < 10 {
+		add("jobs.retention doit valoir au moins 10")
+	}
+	if u, err := url.Parse(c.Upstream.GitHubAPI); err != nil || u.Scheme != "https" || u.Host == "" {
+		add("upstream.github_api : URL https attendue, obtenu %q", c.Upstream.GitHubAPI)
+	}
+	for _, b := range c.CS.AllowedBases {
+		if u, err := url.Parse(b); err != nil || u.Scheme != "https" || u.Host == "" {
+			add("community_scripts.allowed_bases : URL https attendue, obtenu %q", b)
+		}
 	}
 	return errors.Join(errs...)
 }

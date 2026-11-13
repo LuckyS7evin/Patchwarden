@@ -15,6 +15,9 @@
 | Ressources insuffisantes (code 113) | Augmentation temporaire CPU/RAM au niveau demandé par le script, puis **restauration** des valeurs d'origine, même en cas d'échec. Activable invité par invité |
 | LXC de test | CT 103 `dev` (LOKI, Debian 13, base `ct/debian.sh`) ; CT 104 `termix` pour la détection de version |
 | Vérification | Sonde `tools/sonde.sh`, lancée à la main sur le nœud, rapport collé dans la conversation |
+| Historique | Fichiers sur disque (`data_dir/jobs/<id>/meta.json` + `output.jsonl`) plutôt que SQLite : aucune dépendance, lisible à la main, suffisant pour quelques centaines de tâches. Rétention par nombre |
+| Journal en direct | Server-Sent Events, un petit script servi par PatchWarden ; sans JavaScript, la page montre l'état au chargement |
+| Wrapper | Scripts d'invité contenus dans le wrapper (versionné, `pw.wrapper_version`). Détection en POSIX `sh` envoyée par l'entrée standard de `pct exec` |
 
 ## Ce que les scripts community-scripts font réellement (lu dans `ProxmoxVE` et `core`)
 
@@ -126,7 +129,7 @@ Commande : `pct exec 103 -- env PHS_SILENT=1 TERM=dumb update </dev/null`
 | Sortie standard | Bannières ASCII et lignes `✔️ …` seulement ; aucun détail apt | La sortie seule ne suffit pas au journal en direct |
 | Erreurs `curl` (28 : DNS > 5 s ; 22 : 404) | Viennent du téléchargement de la **bannière ASCII** (`core.func`, plusieurs emplacements essayés), sans effet sur la mise à jour | À classer en avertissements. La lenteur DNS du CT 103 est à surveiller |
 | Entrée `update` | ✅ l'ancien format est remplacé par le nouveau (`SCRIPT_SLUG`, `UPDATE_SCRIPT_NAME`, `misc/update.sh`) | Les prochaines exécutions passeront par `community-scripts.org/api/update-info` |
-| `_CS_RUN_LOG` | ❌ ignoré : `ui/build-ui.func` définit `BUILD_LOG=/tmp/create-lxc-<session>.log`, prioritaire, même pendant une mise à jour | Le journal détaillé est dans un fichier au nom aléatoire. Piste : repérer le nouveau `/tmp/create-lxc-*.log` créé après le lancement et le suivre jusqu'à la fin du processus (à confirmer : contenu du fichier) |
+| `_CS_RUN_LOG` | ❌ ignoré : `ui/build-ui.func` définit `BUILD_LOG=/tmp/create-lxc-<session>.log`, prioritaire, même pendant une mise à jour | ✅ Le journal `/tmp/create-lxc-<session>.log` contient tout le détail (sortie apt, lignes `[OK]`/`[INFO]` horodatées) et reste après la fin. PatchWarden repère le nouveau fichier créé après le lancement, le suit jusqu'à la fin du processus, l'archive dans son historique puis le supprime de l'invité. Les `\r` (barres de progression d'apt) sont traités à l'affichage |
 
 ## Questions encore ouvertes
 

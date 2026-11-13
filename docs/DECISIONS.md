@@ -115,6 +115,19 @@ Constats :
   `ghcr.io/<owner>/<repo>` → GitHub, puis label OCI, puis page Docker Hub.
 - Watchtower actif (stack 30) : à arrêter avant le jalon Docker.
 
+## Test H5 : vrai `update` sur le CT 103 (13/11/2026, avec snapshot)
+
+Commande : `pct exec 103 -- env PHS_SILENT=1 TERM=dumb update </dev/null`
+
+| Point | Résultat | Conséquence |
+| :--- | :--- | :--- |
+| Sans interaction | ✅ aucune question, 43 s | `PHS_SILENT=1` + entrée standard fermée pour les scripts sans `read` brut |
+| Code de sortie | ✅ `0`, les 75 paquets sont appliqués (`dist-upgrade -s` : 0 ensuite), pas de redémarrage requis | Code fiable pour le statut de la tâche, à confirmer sur un échec (Termix sera le cas d'école) |
+| Sortie standard | Bannières ASCII et lignes `✔️ …` seulement ; aucun détail apt | La sortie seule ne suffit pas au journal en direct |
+| Erreurs `curl` (28 : DNS > 5 s ; 22 : 404) | Viennent du téléchargement de la **bannière ASCII** (`core.func`, plusieurs emplacements essayés), sans effet sur la mise à jour | À classer en avertissements. La lenteur DNS du CT 103 est à surveiller |
+| Entrée `update` | ✅ l'ancien format est remplacé par le nouveau (`SCRIPT_SLUG`, `UPDATE_SCRIPT_NAME`, `misc/update.sh`) | Les prochaines exécutions passeront par `community-scripts.org/api/update-info` |
+| `_CS_RUN_LOG` | ❌ ignoré : `ui/build-ui.func` définit `BUILD_LOG=/tmp/create-lxc-<session>.log`, prioritaire, même pendant une mise à jour | Le journal détaillé est dans un fichier au nom aléatoire. Piste : repérer le nouveau `/tmp/create-lxc-*.log` créé après le lancement et le suivre jusqu'à la fin du processus (à confirmer : contenu du fichier) |
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).

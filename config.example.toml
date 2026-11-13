@@ -1,0 +1,52 @@
+# PatchWarden : exemple de configuration.
+# Copiez ce fichier en /etc/patchwarden/config.toml (droits 600, propriétaire patchwarden).
+# Ne le versionnez jamais : il contient des secrets. Une clé inconnue est une erreur,
+# ce qui évite les fautes de frappe silencieuses.
+
+[server]
+listen = "0.0.0.0:8080"
+# Mettre à true si l'interface est servie en HTTPS (directement ou via un reverse proxy).
+cookie_secure = false
+
+[auth]
+username = "admin"
+# Généré par : patchwarden hash-password
+password_hash = "$2a$12$remplacez-moi"
+session_duration = "12h"
+
+# Un ou plusieurs points d'accès à l'API Proxmox.
+# - En cluster : un seul suffit (il voit tous les nœuds). En ajouter un second
+#   donne de la redondance si le premier nœud est éteint.
+# - Nœuds autonomes : une section par nœud, chacune avec son propre jeton.
+# Rien n'est codé en dur : changer d'IP (passage en VLAN) = modifier url ici.
+[[proxmox]]
+name = "loki"
+url = "https://192.168.0.141:8006"
+token_id = "patchwarden@pve!inventaire"
+# Secret dans une variable d'environnement (recommandé, voir patchwarden.env),
+# ou directement : token_secret = "xxxxxxxx-xxxx-…"
+token_secret_env = "PATCHWARDEN_TOKEN_LOKI"
+# Empreinte SHA-256 du certificat du nœud, sur le nœud :
+#   openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256
+fingerprint = "AA:BB:CC:…"
+# Ou, à la place, l'autorité du cluster (le nom d'hôte de url doit figurer dans le certificat) :
+# ca_file = "/etc/patchwarden/pve-root-ca.pem"
+
+# [[proxmox]]
+# name = "tyr"
+# url = "https://192.168.0.43:8006"
+# token_id = "patchwarden@pve!inventaire"
+# token_secret_env = "PATCHWARDEN_TOKEN_TYR"
+# fingerprint = "…"
+
+[policy]
+# Tag posé par community-scripts sur ses LXC.
+community_script_tag = "community-script"
+# Invités exigeant une confirmation renforcée : par tag Proxmox…
+critical_tags = ["critique"]
+# … ou par fragment de nom (insensible à la casse).
+special_names = ["omv", "pbs", "proxmox-backup"]
+
+[inventory]
+refresh = "5m"
+timeout = "15s"

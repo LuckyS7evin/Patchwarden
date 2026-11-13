@@ -1,0 +1,40 @@
+[Unit]
+Description=PatchWarden - suivi et mises à jour du homelab Proxmox
+Documentation=https://github.com/LuckyS7evin/Patchwarden
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=patchwarden
+Group=patchwarden
+# Secrets (jetons API) hors du fichier de configuration : voir patchwarden.env.example
+EnvironmentFile=-/etc/patchwarden/patchwarden.env
+ExecStart=/usr/local/bin/patchwarden serve -config /etc/patchwarden/config.toml
+Restart=on-failure
+RestartSec=5
+StateDirectory=patchwarden
+StateDirectoryMode=0750
+MemoryMax=256M
+
+# Durcissement. Si le service échoue avec le statut 226/NAMESPACE dans un LXC
+# non privilégié, activez « nesting » sur le LXC (Options > Fonctionnalités)
+# ou commentez les lignes Private*/Protect* ci-dessous.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

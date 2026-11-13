@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · PatchWarden</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/static/icone.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/static/icone.svg" alt="" width="22" height="22"> PatchWarden</a>
+  {{block "nav" .}}{{end}}
+</header>
+<main>
+{{block "content" .}}{{end}}
+</main>
+<footer>PatchWarden {{.Version}} · aucune action n'est lancée sans confirmation</footer>
+</body>
+</html>

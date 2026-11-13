@@ -1,0 +1,13 @@
+{{define "content"}}
+<section class="login">
+  <h1>Connexion</h1>
+  {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="/connexion">
+    <label for="username">Identifiant</label>
+    <input id="username" name="username" value="{{.Username}}" autocomplete="username" required autofocus>
+    <label for="password">Mot de passe</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" class="btn btn-primary">Se connecter</button>
+  </form>
+</section>
+{{end}}

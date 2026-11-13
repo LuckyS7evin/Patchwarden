@@ -1,0 +1,94 @@
+{{define "nav"}}
+<nav class="userbox">
+  <span>{{.User}}</span>
+  <form method="post" action="/deconnexion">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button type="submit" class="btn btn-link">Se déconnecter</button>
+  </form>
+</nav>
+{{end}}
+
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Inventaire</h1>
+    <p class="muted">
+      {{if .Loaded}}Lu {{.Age}} ({{.FetchedAt}}){{else}}Première lecture en cours…{{end}}
+      {{if .Refreshing}} · <strong>rafraîchissement en cours</strong>{{end}}
+    </p>
+  </div>
+  <form method="post" action="/inventaire/rafraichir?{{.Query}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button type="submit" class="btn">Rafraîchir</button>
+  </form>
+</div>
+
+{{range .Errors}}<p class="alert alert-error" role="alert">Point d'accès en erreur : {{.}}</p>{{end}}
+
+<ul class="stats">
+  <li><span>{{.Counts.Total}}</span> invités</li>
+  <li><span>{{.Counts.LXC}}</span> LXC</li>
+  <li><span>{{.Counts.VM}}</span> VM</li>
+  <li><span>{{.Counts.Running}}</span> démarrés</li>
+  <li><span>{{.Counts.CommunityScript}}</span> community-scripts</li>
+  <li><span>{{.Counts.Critical}}</span> à confirmation renforcée</li>
+</ul>
+
+<form class="filters" method="get" action="/">
+  <label>Nœud
+    <select name="noeud">
+      <option value="">tous</option>
+      {{range .Nodes}}<option value="{{.}}" {{if eq . $.Filter.Node}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Type
+    <select name="type">
+      <option value="">tous</option>
+      <option value="lxc" {{if eq .Filter.Type "lxc"}}selected{{end}}>LXC</option>
+      <option value="qemu" {{if eq .Filter.Type "qemu"}}selected{{end}}>VM</option>
+    </select>
+  </label>
+  <label>Tag
+    <select name="tag">
+      <option value="">tous</option>
+      {{range .Tags}}<option value="{{.}}" {{if eq . $.Filter.Tag}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Recherche
+    <input name="q" value="{{.Filter.Q}}" placeholder="nom ou ID">
+  </label>
+  <button type="submit" class="btn">Filtrer</button>
+  {{if .Filter.Active}}<a class="btn btn-link" href="/">Effacer ({{.Shown}} sur {{.Counts.Total}})</a>{{end}}
+</form>
+
+{{if and .Loaded (not .Groups)}}<p class="muted">Aucun invité ne correspond.</p>{{end}}
+
+{{range .Groups}}
+<section class="node">
+  <h2>{{.Node}} <span class="muted">· {{len .Guests}}</span></h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>ID</th><th>Nom</th><th>Type</th><th>État</th><th class="col-tags">Tags</th><th>Particularités</th></tr></thead>
+    <tbody>
+    {{range .Guests}}
+      <tr{{if .Stale}} class="stale"{{end}}>
+        <td class="num">{{.VMID}}</td>
+        <td>{{.Name}}</td>
+        <td>{{.TypeLabel}}</td>
+        <td><span class="status status-{{.Status}}">{{if eq .Status "running"}}démarré{{else if eq .Status "stopped"}}arrêté{{else}}{{.Status}}{{end}}</span></td>
+        <td class="col-tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</td>
+        <td>
+          {{if .CommunityScript}}<span class="badge badge-cs">community-scripts</span>{{end}}
+          {{if .Critical}}<span class="badge badge-crit" title="Motif : {{.CriticalReason}}">confirmation renforcée</span>{{end}}
+          {{if .Template}}<span class="badge">modèle</span>{{end}}
+          {{if .Lock}}<span class="badge badge-warn">verrou : {{.Lock}}</span>{{end}}
+          {{if .Stale}}<span class="badge badge-warn">nœud injoignable, données anciennes</span>{{end}}
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+</section>
+{{end}}
+{{end}}

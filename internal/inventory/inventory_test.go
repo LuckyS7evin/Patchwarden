@@ -1,0 +1,113 @@
+package inventory
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/LuckyS7evin/patchwarden/internal/config"
+	"github.com/LuckyS7evin/patchwarden/internal/proxmox"
+)
+
+type fake struct {
+	name string
+	res  []proxmox.Resource
+	err  error
+}
+
+func (f *fake) Name() string { return f.name }
+func (f *fake) Guests(context.Context) ([]proxmox.Resource, error) {
+	return f.res, f.err
+}
+
+var policy = config.Policy{
+	CommunityScriptTag: "community-script",
+	CriticalTags:       []string{"critique"},
+	SpecialNames:       []string{"omv", "pbs"},
+}
+
+func newSvc(src ...Source) *Service {
+	return New(src, policy, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func cluster() []proxmox.Resource {
+	return []proxmox.Resource{
+		{Type: "lxc", VMID: 104, Node: "loki", Name: "termix", Status: "running", Tags: "community-script;ssh"},
+		{Type: "qemu", VMID: 403, Node: "tyr", Name: "OMV6", Status: "running"},
+		{Type: "qemu", VMID: 203, Node: "loki", Name: "PBS", Status: "running", Tags: "Critique"},
+		{Type: "lxc", VMID: 117, Node: "odin", Name: "claude-ops", Status: "running", Tags: "community-script;os"},
+		{Type: "storage", Node: "loki"},
+	}
+}
+
+func TestClusterFromTwoEndpointsIsDeduplicated(t *testing.T) {
+	s := newSvc(&fake{name: "loki", res: cluster()}, &fake{name: "tyr", res: cluster()})
+	s.Refresh(context.Background())
+	snap, _ := s.Current()
+	if len(snap.Guests) != 4 {
+		t.Fatalf("4 invités attendus (doublons et stockage exclus), obtenu %d", len(snap.Guests))
+	}
+	if snap.Guests[0].Key() != "loki/104" || snap.Guests[3].Key() != "tyr/403" {
+		t.Errorf("tri nœud puis VMID incorrect : %v", snap.Guests)
+	}
+	if got := snap.Nodes(); len(got) != 3 {
+		t.Errorf("nœuds : %v", got)
+	}
+}
+
+func TestClassification(t *testing.T) {
+	s := newSvc(&fake{name: "loki", res: cluster()})
+	s.Refresh(context.Background())
+	snap, _ := s.Current()
+	by := map[int]Guest{}
+	for _, g := range snap.Guests {
+		by[g.VMID] = g
+	}
+	if !by[104].CommunityScript || by[104].Critical {
+		t.Errorf("termix : %+v", by[104])
+	}
+	if !by[203].Critical || by[203].CriticalReason != "tag « critique »" {
+		t.Errorf("PBS (tag en majuscules) : %+v", by[203])
+	}
+	if !by[403].Critical || by[403].CriticalReason != "nom contenant « omv »" {
+		t.Errorf("OMV (par le nom) : %+v", by[403])
+	}
+	if by[403].CommunityScript {
+		t.Error("une VM ne peut pas être community-script")
+	}
+}
+
+func TestStandaloneNodeDownKeepsStaleGuests(t *testing.T) {
+	loki := &fake{name: "loki", res: []proxmox.Resource{{Type: "lxc", VMID: 104, Node: "loki", Name: "termix"}}}
+	tyr := &fake{name: "tyr", res: []proxmox.Resource{{Type: "qemu", VMID: 403, Node: "tyr", Name: "OMV6"}}}
+	s := newSvc(loki, tyr)
+	s.Refresh(context.Background())
+
+	tyr.err = errors.New("délai dépassé")
+	s.Refresh(context.Background())
+	snap, _ := s.Current()
+	if len(snap.Guests) != 2 {
+		t.Fatalf("les invités de tyr doivent rester affichés : %+v", snap.Guests)
+	}
+	for _, g := range snap.Guests {
+		if (g.Node == "tyr") != g.Stale {
+			t.Errorf("marquage périmé incorrect : %+v", g)
+		}
+	}
+	if snap.Errors["tyr"] == "" || snap.Errors["loki"] != "" {
+		t.Errorf("erreurs par point d'accès : %v", snap.Errors)
+	}
+}
+
+func TestTriggerRefreshCoalesces(t *testing.T) {
+	s := newSvc(&fake{name: "loki"})
+	for i := 0; i < 5; i++ {
+		s.TriggerRefresh() // ne doit jamais bloquer
+	}
+	if len(s.trigger) != 1 {
+		t.Errorf("demandes non fusionnées : %d", len(s.trigger))
+	}
+}

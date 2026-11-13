@@ -307,7 +307,7 @@ qga_exec() {
   else
     qm guest exec "$vmid" "${opts[@]}" -- "$@" </dev/null 2>&1
   fi | perl -MJSON::PP -0777 -ne '
-    my $j = eval { JSON::PP->new->decode($_) };
+    my $j = eval { JSON::PP->new->utf8->decode($_) };
     if (!$j) { print "réponse brute : $_\n"; exit }
     print $j->{"out-data"} // "";
     print "\n[stderr]\n", $j->{"err-data"} if defined $j->{"err-data"} && length $j->{"err-data"};
@@ -343,7 +343,7 @@ probe_vm() {
   echo "ping : OK"
   echo "commandes de l'agent (guest-exec activé ?) :"
   timeout 30 qm guest cmd "$id" info 2>&1 | perl -MJSON::PP -0777 -ne '
-    my $j = eval { JSON::PP->new->decode($_) } or do { print "  réponse brute : $_\n"; exit };
+    my $j = eval { JSON::PP->new->utf8->decode($_) } or do { print "  réponse brute : $_\n"; exit };
     print "  version de qemu-ga : ", ($j->{version} // "?"), "\n";
     for my $c (@{ $j->{supported_commands} // [] }) {
       next unless $c->{name} =~ /^guest-(exec|exec-status|file-open|file-read|file-write|fsfreeze-status)$/;
@@ -365,12 +365,12 @@ probe_vm() {
     local pid t st
     local raw
     raw="$(qm guest exec "$id" --synchronous 0 -- bash -c 'for i in 1 2 3 4 5; do echo "ligne $i"; sleep 1; done' </dev/null 2>&1)"
-    pid="$(perl -MJSON::PP -0777 -ne 'my $j = eval { JSON::PP->new->decode($_) }; print $j->{pid} // ""' <<<"$raw")"
+    pid="$(perl -MJSON::PP -0777 -ne 'my $j = eval { JSON::PP->new->utf8->decode($_) }; print $j->{pid} // ""' <<<"$raw")"
     if [[ -z "$pid" ]]; then echo "  impossible de lancer en asynchrone : $raw"; return; fi
     for t in 1 2 3 4 5 6 7; do
       sleep 1
       st="$(qm guest exec-status "$id" "$pid" 2>&1 | perl -MJSON::PP -0777 -ne '
-        my $j = eval { JSON::PP->new->decode($_) } or do { print "illisible"; exit };
+        my $j = eval { JSON::PP->new->utf8->decode($_) } or do { print "illisible"; exit };
         my $o = $j->{"out-data"} // ""; $o =~ s/\n/\\n/g;
         print "terminé=", ($j->{exited} ? "oui" : "non"), " sortie=\"$o\""')"
       echo "  t+${t}s : $st"

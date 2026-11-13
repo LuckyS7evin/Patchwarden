@@ -6,9 +6,10 @@
 | :--- | :--- |
 | Stack | **Go** : un seul binaire, `net/http`, `golang.org/x/crypto/ssh`, SQLite, templates embarqués + HTMX, logs en direct par SSE |
 | Exécution | Pas d'agent dans les invités : `pct exec` (LXC) et `qm guest exec` (VM), par SSH sur les nœuds |
-| Accès aux nœuds | Utilisateur dédié `patchwarden`, clé restreinte (`from=`, `restrict`, `command=`) vers un wrapper qui n'accepte qu'un vocabulaire fixe. Scripts d'action installés et versionnés sur le nœud. Rien n'agit sur l'hôte lui-même |
-| Inventaire | API Proxmox, jeton `PVEAuditor` (lecture seule). Configuration multi-points d'accès avec dédoublonnage : la sonde a détecté un `corosync.conf` sur LOKI (cluster à confirmer) |
+| Accès aux nœuds | Clé SSH dédiée sur **root**, restreinte par `from=<IP PatchWarden>`, `restrict` et `command=` vers un wrapper qui n'accepte qu'un vocabulaire fixe (pas de `sudo` sur les nœuds, rien à installer hormis le wrapper). Scripts d'action installés et versionnés sur le nœud. Rien n'agit sur l'hôte lui-même. En cluster, `/root/.ssh/authorized_keys` est partagé par tous les nœuds : le wrapper doit être présent sur chacun |
+| Inventaire | API Proxmox `/cluster/resources`, jeton `PVEAuditor` (lecture seule). Cluster `Home` de 3 nœuds aujourd'hui, mais sortie possible : la configuration accepte un ou plusieurs points d'accès, chacun avec son jeton, et fusionne les résultats en dédoublonnant (nœud, VMID). Les deux modes fonctionnent sans changement de code |
 | VMs | `qemu-guest-agent` présent et activé sur toutes les VMs |
+| Ressources insuffisantes (code 113) | Augmentation temporaire CPU/RAM au niveau demandé par le script, puis **restauration** des valeurs d'origine, même en cas d'échec. Activable invité par invité |
 | LXC de test | CT 103 `dev` (LOKI, Debian 13, base `ct/debian.sh`) ; CT 104 `termix` pour la détection de version |
 | Vérification | Sonde `tools/sonde.sh`, lancée à la main sur le nœud, rapport collé dans la conversation |
 
@@ -82,12 +83,39 @@ Règle retenue : l'entrée standard est toujours explicite. PatchWarden repère 
 bruts dans `update_script()` et bloque la mise à jour de l'appli tant qu'une réponse
 n'est pas enregistrée pour cet invité. Il recommande aussi le snapshot.
 
+## Résultats de la sonde n° 2 (LOKI, 13/11/2026)
+
+| Point | Résultat | Conséquence |
+| :--- | :--- | :--- |
+| Cluster | `Home`, 3 nœuds, quorum OK | Inventaire complet depuis un seul point d'accès ; config prête pour un retour en nœuds autonomes |
+| Version Termix | `/root/.termix = release-2.6.1-tag`, alors que les tags actuels sont `v26.11.x` | Comparaison en chaînes confirmée : « installée ≠ dernière » |
+| VM 503 `guest-exec` | ✅ fonctionne (qemu-ga 5.2.0). L'échec n° 1 venait probablement du script de 7 Ko passé en argument, qui a bloqué l'agent un moment | Toujours `--pass-stdin` ou fichier, jamais de gros argument ; délais et une seule exécution à la fois par VM |
+| Sortie de `qm guest exec` | Encodée deux fois : `qm` lit les octets de la VM comme du latin-1 puis émet du JSON UTF-8 (« systÃ¨me ») | Après décodage JSON, reconvertir chaque caractère (< 256) en octet avant de lire la chaîne en UTF-8 |
+| Flux VM | ❌ `exec-status` ne renvoie la sortie qu'à la fin du processus ; après la première lecture du résultat, le PID est libéré | Pour les VMs : lancer la commande en arrière-plan avec sortie dans un fichier de la VM, puis relire ce fichier par décalage toutes les 1 à 2 s (quasi direct), code de sortie écrit dans un second fichier |
+| VM 503 OS | Debian 11 (bullseye), index apt vieux de 15 mois, 100 paquets dont 99 de sécurité ; dépôt Docker `buster` sur bullseye | Afficher l'âge de l'index et l'OS ; la fin de support des OS fait partie des propositions |
+| Mode sécurité strict | 98 sur 99 en VM : un correctif de sécurité ne passe pas seul (cause exacte à identifier, probablement une dépendance hors dépôt sécurité) | Le mode strict laisse ce paquet de côté : PatchWarden l'indiquera (« 1 correctif de sécurité nécessite « Tout mettre à jour » ») |
+
+### Docker dans la VM 503 (premier aperçu)
+
+| Origine | Conteneurs | Mise à jour envisagée |
+| :--- | :--- | :--- |
+| Stack Portainer (`/data/compose/<id>`, soit `/var/lib/docker/volumes/portainer_data/_data/compose/<id>` sur la VM) | dozzle, upsnap, ersatztv, lms, mealie, watchtower, portainer_agent | API Portainer : re-déploiement de la stack avec re-pull (l'id de stack = le numéro du dossier) |
+| Compose classique | beszel, beszel-agent (`/home/s7evin/beszel`) | `docker compose pull && up -d` dans le dossier du projet |
+| `docker run` | portainer | Détection seulement ; pas de recréation automatique |
+
+Constats :
+- **Tags épinglés** (`mealie:v1.8.0`, `upsnap:5`, `lms:stable`) : la comparaison de digest dit seulement si
+  *ce tag* a été reconstruit. Il faut une seconde information, « nouvelle version disponible »
+  (liste des tags du registre ou release GitHub), sans jamais changer le tag automatiquement.
+- **Label `org.opencontainers.image.source` peu fiable** : ersatztv pointe vers `ErsatzTV-ffmpeg`
+  (label hérité de l'image de base). Ordre retenu pour le lien changelog : correspondance connue
+  `ghcr.io/<owner>/<repo>` → GitHub, puis label OCI, puis page Docker Hub.
+- Watchtower actif (stack 30) : à arrêter avant le jalon Docker.
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).
 8. LXC PatchWarden : nœud, VLAN, accès Internet, jeton GitHub en lecture seule.
 9. Invités arrêtés (ex. CT 108 teamspeak) : ignorés par défaut ?
-10. Code 113 (Termix) : augmentation temporaire CPU/RAM puis retour, forçage de `var_cpu`/`var_ram` (risque de manque de mémoire à la compilation), ou simple signalement ?
 12. Versions de PVE et des OS d'invités ; `pve-ups` et Dev inclus ; langue de l'interface.
-13. Accès aux nœuds : root avec commande forcée (rien à installer sur l'hôte) ou installation de `sudo` ?
-14. Cluster : LOKI a un `corosync.conf`. Les 3 nœuds sont-ils en cluster ?
+15. Docker : API Portainer pour les stacks Portainer (un jeton par instance : VM 102, 107, 503), compose direct pour les autres ?

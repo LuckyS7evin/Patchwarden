@@ -92,19 +92,11 @@ else
   echo "absent (invité non créé par community-scripts, ou entrée supprimée)"
 fi
 
-sec "fichiers de version /root/.<app>"
-found=0
+sec "petits fichiers caches de /root (noms seulement, le contenu des fichiers de version est lu par l'hote)"
 for f in /root/.[!.]*; do
-  [ -f "$f" ] || continue
-  [ "$(stat -c %s "$f")" -le 80 ] || continue
-  [ "$(wc -l <"$f")" -le 1 ] || continue
-  v="$(tr -d '\r\n' <"$f")"
-  if printf '%s' "$v" | grep -Eq '^v?[0-9][0-9A-Za-z._+-]*$'; then
-    printf '%s=%s (modifié le %s)\n' "${f##*/}" "$v" "$(stat -c %y "$f" | cut -d. -f1)"
-    found=1
-  fi
+  [ -f "$f" ] && [ "$(stat -c %s "$f")" -le 120 ] && printf '%s ' "${f##*/}"
 done
-[ "$found" = 1 ] || echo "aucun"
+echo
 
 sec "addons, état community-scripts, journaux"
 ls -1 /usr/local/bin/update_* 2>/dev/null | sed 's/^/addon : /' || true
@@ -240,13 +232,22 @@ snap_verdict() {
 
 # Analyse du script ct/<nom>.sh community-scripts (téléchargé par l'hôte).
 analyse_ct_script() {
-  local name="$1" base="$2" body
+  local id="$1" name="$2" base="$3" body app f
   h2 "script ${base}/ct/${name}.sh"
   if ! body="$(curl -fsSL -m 15 "${base}/ct/${name}.sh")"; then
     echo "introuvable (script renommé ou supprimé ?)"
     return
   fi
   printf '%s\n' "$body" | grep -E '^var_(cpu|ram|disk|os|version)=' | sed 's/^/  /'
+  # Fichiers de version : exactement ceux que le script lit (~/.<app> en minuscules,
+  # espaces retirés), quel que soit le format du tag (v1.2, release-1.2-tag…).
+  echo "  fichiers de version lus par le script :"
+  while IFS= read -r app; do
+    [[ -z "$app" ]] && continue
+    f="/root/.$(tr -d ' ' <<<"${app,,}")"
+    printf '    %s = %s\n' "$f" "$(timeout 30 pct exec "$id" -- sh -c "if [ -f '$f' ]; then head -c 120 '$f'; else echo '(absent)'; fi" 2>&1 | tr -d '\r\n')"
+  done < <(printf '%s\n' "$body" | grep -oE '(check_for_[a-z_]*(release|tag)|fetch_and_deploy_[a-z_]*(release|tag))[[:space:]]+"[^"$]+"' |
+    sed -E 's/.*"([^"]+)"$/\1/' | sort -u)
   echo "  éléments de la fonction update_script :"
   printf '%s\n' "$body" | awk '/^function update_script|^update_script\(\)/,/^}/' |
     grep -nE 'check_for_[a-z_]*(release|tag)|fetch_and_deploy|run_os_update|apt(-get)? .*upgrade|npm (install|update)|pip|uv |docker|read -r|whiptail|msg_menu|prompt_confirm|exit [0-9]+' |
@@ -281,11 +282,13 @@ probe_ct() {
   base="${base:-https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main}"
   echo "appli community-scripts détectée : ${name:-aucune}"
 
-  out="$(timeout 600 pct exec "$id" -- bash -c "$INNER" pw-sonde "$REFRESH" "${name:--}" 2>&1)"
+  # Script envoyé par l'entrée standard : passé en argument, pct le ré-encode
+  # (accents abîmés dans le premier rapport).
+  out="$(timeout 600 pct exec "$id" -- bash -s -- "$REFRESH" "${name:--}" <<<"$INNER" 2>&1)"
   echo "code de sortie de pct exec : $?"
   printf '%s\n' "$out"
 
-  [[ -n "$name" ]] && analyse_ct_script "$name" "$base"
+  [[ -n "$name" ]] && analyse_ct_script "$id" "$name" "$base"
 
   if [[ "$STREAM" == 1 ]]; then
     h2 "test de flux pct exec (horodatage à la réception côté hôte, attendu : 1 ligne/s)"
@@ -296,8 +299,14 @@ probe_ct() {
 
 # Exécute une commande via le guest agent et affiche sortie + code.
 qga_exec() {
-  local vmid="$1"; shift
-  qm guest exec "$vmid" --timeout 600 -- "$@" 2>&1 | perl -MJSON::PP -0777 -ne '
+  local vmid="$1" tmo="$2"; shift 2
+  local opts=(--timeout "$tmo")
+  [[ -n "${QGA_STDIN:-}" ]] && opts+=(--pass-stdin 1)
+  if [[ -n "${QGA_STDIN:-}" ]]; then
+    qm guest exec "$vmid" "${opts[@]}" -- "$@" <<<"$QGA_STDIN" 2>&1
+  else
+    qm guest exec "$vmid" "${opts[@]}" -- "$@" </dev/null 2>&1
+  fi | perl -MJSON::PP -0777 -ne '
     my $j = eval { JSON::PP->new->decode($_) };
     if (!$j) { print "réponse brute : $_\n"; exit }
     print $j->{"out-data"} // "";
@@ -332,14 +341,32 @@ probe_vm() {
     return
   fi
   echo "ping : OK"
-  qga_exec "$id" bash -c "$INNER" pw-sonde "$REFRESH" "-"
+  echo "commandes de l'agent (guest-exec activé ?) :"
+  timeout 30 qm guest cmd "$id" info 2>&1 | perl -MJSON::PP -0777 -ne '
+    my $j = eval { JSON::PP->new->decode($_) } or do { print "  réponse brute : $_\n"; exit };
+    print "  version de qemu-ga : ", ($j->{version} // "?"), "\n";
+    for my $c (@{ $j->{supported_commands} // [] }) {
+      next unless $c->{name} =~ /^guest-(exec|exec-status|file-open|file-read|file-write|fsfreeze-status)$/;
+      print "  $c->{name} : ", ($c->{enabled} ? "activé" : "DÉSACTIVÉ"), "\n" }'
+  echo "état fsfreeze : $(timeout 30 qm guest cmd "$id" fsfreeze-status 2>&1)"
+  echo "test minimal (/bin/true, délai 30 s) :"
+  timeout 60 qm guest exec "$id" --timeout 30 -- /bin/true </dev/null 2>&1 | sed 's/^/  /'
+  echo "test minimal (uname -a) :"
+  qga_exec "$id" 30 uname -a | sed 's/^/  /'
+
+  if qm help guest exec 2>/dev/null | grep -q pass-stdin; then
+    QGA_STDIN="$INNER" qga_exec "$id" 600 bash -s -- "$REFRESH" "-"
+  else
+    qga_exec "$id" 600 bash -c "$INNER" pw-sonde "$REFRESH" "-"
+  fi
 
   if [[ "$STREAM" == 1 ]]; then
     h2 "test de flux qm guest exec (la sortie arrive-t-elle avant la fin du processus ?)"
     local pid t st
-    pid="$(qm guest exec "$id" --synchronous 0 -- bash -c 'for i in 1 2 3 4 5; do echo "ligne $i"; sleep 1; done' 2>&1 |
-      perl -MJSON::PP -0777 -ne 'my $j = eval { JSON::PP->new->decode($_) }; print $j->{pid} // ""')"
-    if [[ -z "$pid" ]]; then echo "  impossible de lancer en asynchrone"; return; fi
+    local raw
+    raw="$(qm guest exec "$id" --synchronous 0 -- bash -c 'for i in 1 2 3 4 5; do echo "ligne $i"; sleep 1; done' </dev/null 2>&1)"
+    pid="$(perl -MJSON::PP -0777 -ne 'my $j = eval { JSON::PP->new->decode($_) }; print $j->{pid} // ""' <<<"$raw")"
+    if [[ -z "$pid" ]]; then echo "  impossible de lancer en asynchrone : $raw"; return; fi
     for t in 1 2 3 4 5 6 7; do
       sleep 1
       st="$(qm guest exec-status "$id" "$pid" 2>&1 | perl -MJSON::PP -0777 -ne '
@@ -357,7 +384,13 @@ echo "options : refresh-apt=${REFRESH} test-stream=${STREAM}"
 
 h1 "Hôte"
 pveversion 2>&1
-if [[ -f /etc/pve/corosync.conf ]]; then echo "cluster : oui"; else echo "cluster : non (nœud autonome)"; fi
+if [[ -f /etc/pve/corosync.conf ]]; then
+  echo "cluster : oui (corosync.conf présent)"
+  echo "nœuds connus (/etc/pve/nodes) : $(ls /etc/pve/nodes | tr '\n' ' ')"
+  pvecm status 2>&1 | grep -E '^(Cluster information|Name:|Nodes:|Quorate:|Expected votes:|Total votes:)|^ *0x' | sed 's/^/  /'
+else
+  echo "cluster : non (nœud autonome)"
+fi
 line=""
 for c in sudo perl jq python3 curl timeout; do
   if command -v "$c" >/dev/null 2>&1; then line="$line $c=oui"; else line="$line $c=non"; fi
@@ -369,25 +402,32 @@ pvesm status 2>&1
 h2 "types de stockage (storage.cfg, en-têtes seulement)"
 for n in "${!STYPE[@]}"; do echo "  $n : ${STYPE[$n]}"; done
 
-h1 "Inventaire du nœud"
-h2 "LXC (CTID | hostname | état | tags | non privilégié | features)"
-for f in /etc/pve/nodes/"$NODE"/lxc/*.conf; do
-  [[ -f "$f" ]] || continue
-  id="$(basename "$f" .conf)"
-  printf '  %s | %s | %s | %s | %s | %s\n' "$id" \
-    "$(sed -n '/^\[/q;s/^hostname: //p' "$f")" "$(pct status "$id" 2>/dev/null | sed 's/status: //')" \
-    "$(sed -n '/^\[/q;s/^tags: //p' "$f")" "$(sed -n '/^\[/q;s/^unprivileged: //p' "$f")" \
-    "$(sed -n '/^\[/q;s/^features: //p' "$f")"
-  [[ "$ALL" == 1 && "$(pct status "$id" 2>/dev/null)" == *running* ]] && CTS+=("$id")
-done
-h2 "VM (VMID | nom | état | tags | agent)"
-for f in /etc/pve/nodes/"$NODE"/qemu-server/*.conf; do
-  [[ -f "$f" ]] || continue
-  id="$(basename "$f" .conf)"
-  printf '  %s | %s | %s | %s | %s\n' "$id" \
-    "$(sed -n '/^\[/q;s/^name: //p' "$f")" "$(qm status "$id" 2>/dev/null | sed 's/status: //')" \
-    "$(sed -n '/^\[/q;s/^tags: //p' "$f")" "$(sed -n '/^\[/q;s/^agent: //p' "$f")"
-  [[ "$ALL" == 1 && "$(qm status "$id" 2>/dev/null)" == *running* ]] && VMS+=("$id")
+h1 "Inventaire (tous les nœuds visibles dans /etc/pve/nodes)"
+for nd in /etc/pve/nodes/*/; do
+  nn="$(basename "$nd")"
+  h2 "nœud ${nn} - LXC (CTID | hostname | état | tags | non privilégié | features)"
+  for f in "$nd"lxc/*.conf; do
+    [[ -f "$f" ]] || continue
+    id="$(basename "$f" .conf)"
+    st="(état lisible seulement sur ${nn})"
+    [[ "$nn" == "$NODE" ]] && st="$(pct status "$id" 2>/dev/null | sed 's/status: //')"
+    printf '  %s | %s | %s | %s | %s | %s\n' "$id" \
+      "$(sed -n '/^\[/q;s/^hostname: //p' "$f")" "$st" \
+      "$(sed -n '/^\[/q;s/^tags: //p' "$f")" "$(sed -n '/^\[/q;s/^unprivileged: //p' "$f")" \
+      "$(sed -n '/^\[/q;s/^features: //p' "$f")"
+    [[ "$ALL" == 1 && "$nn" == "$NODE" && "$st" == running ]] && CTS+=("$id")
+  done
+  h2 "nœud ${nn} - VM (VMID | nom | état | tags | agent)"
+  for f in "$nd"qemu-server/*.conf; do
+    [[ -f "$f" ]] || continue
+    id="$(basename "$f" .conf)"
+    st="(état lisible seulement sur ${nn})"
+    [[ "$nn" == "$NODE" ]] && st="$(qm status "$id" 2>/dev/null | sed 's/status: //')"
+    printf '  %s | %s | %s | %s | %s\n' "$id" \
+      "$(sed -n '/^\[/q;s/^name: //p' "$f")" "$st" \
+      "$(sed -n '/^\[/q;s/^tags: //p' "$f")" "$(sed -n '/^\[/q;s/^agent: //p' "$f")"
+    [[ "$ALL" == 1 && "$nn" == "$NODE" && "$st" == running ]] && VMS+=("$id")
+  done
 done
 
 for id in "${CTS[@]}"; do probe_ct "$id"; done

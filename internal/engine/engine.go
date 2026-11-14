@@ -31,6 +31,10 @@ type Engine struct {
 	AptRefresh bool
 	Timeout    time.Duration
 	Log        *slog.Logger
+	Answers    *AnswerStore
+	// SelfGuest (« nœud/vmid ») ou, à défaut, Hostname : invité hébergeant PatchWarden.
+	SelfGuest string
+	Hostname  string
 }
 
 // Erreurs de refus, affichées telles quelles dans l'interface.
@@ -44,7 +48,11 @@ var (
 	ErrStaleNode   = errors.New("nœud injoignable lors du dernier inventaire")
 	exitRefused    = 2
 	exitNotRunning = 3
+	exitBusy       = 99
 )
+
+// WrapperVersion est la version du wrapper attendue sur les nœuds.
+const WrapperVersion = 2
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {
@@ -94,37 +102,46 @@ func (e *Engine) DetectAll(guests []inventory.Guest, user string) (started, skip
 
 func (e *Engine) detectFunc(g inventory.Guest) jobs.Func {
 	return func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
-		ctx, cancel := context.WithTimeout(ctx, e.Timeout)
-		defer cancel()
-		refresh := "0"
-		if e.AptRefresh {
-			refresh = "1"
-		}
-		cmd := fmt.Sprintf("lxc-detect %d %s", g.VMID, refresh)
-		log(false, fmt.Sprintf("▶ %s · CT %d (%s) sur %s", cmd, g.VMID, g.Name, g.Node))
-		if e.AptRefresh {
-			log(false, "  (apt-get update est lancé dans l'invité : il rafraîchit l'index des paquets, sans rien installer)")
-		}
-		out, errs, code, err := e.run(ctx, g.Node, cmd, log)
+		res, err := e.detectRun(ctx, g, job.ID, log)
 		if err != nil {
 			return "", err
-		}
-		if err := explainExit(code, errs); err != nil {
-			return "", err
-		}
-		res, err := detect.Parse(out)
-		if err != nil {
-			return "", err
-		}
-		res.At, res.JobID = time.Now(), job.ID
-		e.enrichCS(ctx, g, &res, log)
-
-		key := target(g).Key()
-		if err := e.Store.Put(key, res); err != nil {
-			e.Log.Error("enregistrement de la détection", "invité", key, "erreur", err)
 		}
 		return summarize(res), nil
 	}
+}
+
+// detectRun exécute la détection complète d'un invité et enregistre le résultat.
+func (e *Engine) detectRun(ctx context.Context, g inventory.Guest, jobID string, log jobs.Logger) (detect.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, e.Timeout)
+	defer cancel()
+	refresh := "0"
+	if e.AptRefresh {
+		refresh = "1"
+	}
+	cmd := fmt.Sprintf("lxc-detect %d %s", g.VMID, refresh)
+	log(false, fmt.Sprintf("▶ %s · CT %d (%s) sur %s", cmd, g.VMID, g.Name, g.Node))
+	if e.AptRefresh {
+		log(false, "  (apt-get update est lancé dans l'invité : il rafraîchit l'index des paquets, sans rien installer)")
+	}
+	out, errs, code, err := e.run(ctx, g.Node, cmd, log)
+	if err != nil {
+		return detect.Result{}, err
+	}
+	if err := explainExit(code, errs); err != nil {
+		return detect.Result{}, err
+	}
+	res, err := detect.Parse(out)
+	if err != nil {
+		return detect.Result{}, err
+	}
+	res.At, res.JobID = time.Now(), jobID
+	e.enrichCS(ctx, g, &res, log)
+
+	key := target(g).Key()
+	if err := e.Store.Put(key, res); err != nil {
+		e.Log.Error("enregistrement de la détection", "invité", key, "erreur", err)
+	}
+	return res, nil
 }
 
 // run exécute un verbe et renvoie stdout, stderr et le code de sortie, tout en
@@ -150,7 +167,12 @@ func explainExit(code int, errs []string) error {
 	case 0:
 		return nil
 	case exitRefused:
+		if strings.Contains(last, "verbe inconnu") {
+			return fmt.Errorf("wrapper du nœud trop ancien (%s) : installez la version %d, voir README", strings.TrimPrefix(last, "PW-REFUS: "), WrapperVersion)
+		}
 		return fmt.Errorf("refusé par le wrapper du nœud : %s", strings.TrimPrefix(last, "PW-REFUS: "))
+	case exitBusy:
+		return errors.New("une opération PatchWarden est déjà en cours sur ce CT (verrou du nœud)")
 	case exitNotRunning:
 		return ErrStopped
 	case 124:

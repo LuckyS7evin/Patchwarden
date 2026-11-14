@@ -12,8 +12,9 @@ de mémoire, sans agent dans les invités.
 | 0 | Sonde de vérification des hypothèses (`tools/sonde.sh`) | ✅ |
 | 1 | Configuration, authentification, inventaire de tous les nœuds via l'API (lecture seule) | ✅ |
 | 2 | Wrapper SSH sur les nœuds, tâches asynchrones, journaux en direct, historique, **détection** (apt, appli community-scripts, dernière version, changelog) | ✅ |
-| 3 | Mises à jour d'un LXC : simulation, « Sécurité uniquement », « Tout mettre à jour », confirmation | à faire |
-| 4 et + | « Sécurité uniquement », lots, VMs, Docker, snapshots | à faire |
+| 3 | Mises à jour d'un LXC : simulation, « Sécurité uniquement », « Tout mettre à jour » (apt + `update` community-scripts), confirmation | ✅ |
+| 4 | Lots, VMs (guest agent), OMV/PBS | à faire |
+| 5 et + | Docker (Portainer), snapshots avant mise à jour, propositions | à faire |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -28,9 +29,22 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
 - tâches en arrière-plan (une seule à la fois par invité), journal complet en direct,
   historique conservé.
 
-**Elle n'installe encore rien.** La détection lance seulement `apt-get update` dans les
-invités, pour rafraîchir l'index des paquets (désactivable : `detection.apt_refresh`). Les
-VM, Docker et les actions de mise à jour arrivent dans les jalons suivants.
+- **mises à jour d'un LXC**, depuis la page de l'invité, toujours après une page de
+  confirmation qui détaille le plan :
+  - « Sécurité uniquement » : `apt-get --with-new-pkgs upgrade` limité aux dépôts `*-security` ;
+  - « Tout mettre à jour » : apt complet, puis la commande `update` community-scripts si une
+    version plus récente de l'appli est publiée ;
+  - « Simuler » (`apt-get -s`) ou « Appliquer » (case à cocher ; nom de l'invité à saisir
+    pour les invités critiques) ; une détection est relancée à la fin pour vérifier ;
+  - jamais de suppression de paquet ; en cas de conflit de configuration, vos fichiers sont gardés ;
+  - questions posées par certains scripts sans terminal (Termix : « Update Nginx
+    configuration? ») : la réponse est choisie une fois par invité ;
+  - CPU/RAM exigés par le script : augmentés temporairement par le wrapper puis restaurés,
+    même en cas d'échec ;
+  - aucune action sur l'invité qui héberge PatchWarden (`policy.self_guest`).
+
+Pas encore de snapshot automatique avant mise à jour (prochain jalon) : gardez vos
+sauvegardes PBS à jour pour les invités sensibles.
 
 ## Installation
 
@@ -204,8 +218,12 @@ Chaque appel au wrapper est journalisé sur le nœud : `journalctl -t patchwarde
 
 Remplacez `/usr/local/bin/patchwarden`, puis `systemctl restart patchwarden`. Les sessions
 sont gardées en mémoire : il faudra se reconnecter. Une tâche en cours au moment du
-redémarrage est marquée « interrompue » dans l'historique. Si une nouvelle version change
-le wrapper, réinstallez-le sur les nœuds : `check-config` affiche la version installée.
+redémarrage est marquée « interrompue » dans l'historique (une mise à jour, elle, se termine
+sur le nœud : voir son journal dans `/var/log/patchwarden/`).
+
+Si une nouvelle version change le wrapper, réinstallez-le sur les nœuds (mêmes commandes
+qu'à l'étape 6, depuis le nœud qui héberge PatchWarden). `check-config` signale un nœud dont
+le wrapper est trop ancien.
 
 ## Droits nécessaires (moindre privilège)
 
@@ -220,14 +238,19 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v1) | Effet dans l'invité |
+| Verbe (wrapper v2) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
 | `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
+| `lxc-apt <vmid> <security\|full> <0\|1>` | `apt-get update` puis `apt-get --with-new-pkgs upgrade` (dépôts `*-security` seuls en mode `security`). `1` = simulation (`apt-get -s`), rien n'est modifié |
+| `lxc-cs-update <vmid> <réponses> <cpu> <ram>` | Commande `update` community-scripts sans terminal (`PHS_SILENT=1`), réponses aux questions sur l'entrée standard. Si le CT a moins que `cpu`/`ram` (exigés par le script) : `pct set` temporaire, puis restauration des valeurs d'origine |
 
-Les verbes de mise à jour (`apt`, `update` community-scripts, snapshots) viendront au jalon 3,
-avec la même règle : un verbe par action, rien d'arbitraire.
+Les mises à jour réelles tournent **détachées sur le nœud**, sous un verrou par CT : si la
+connexion SSH est perdue (redémarrage de PatchWarden, réseau), l'opération se termine quand
+même, ressources restaurées comprises. Leur journal complet reste 30 jours sur le nœud dans
+`/var/log/patchwarden/`. Le wrapper écrit donc sur l'hôte uniquement ce journal et un fichier
+de verrou dans `/run/lock`, et lance `pct set` sur le CT visé (ressources) ; rien d'autre.
 
 ## Sécurité
 

@@ -143,6 +143,10 @@ type Policy struct {
 	// SpecialNames : fragments de nom (insensibles à la casse) qui signalent
 	// OMV, PBS, etc. Confirmation renforcée également.
 	SpecialNames []string `toml:"special_names"`
+	// SelfGuest : invité qui héberge PatchWarden (« nœud/vmid », ex. « loki/103 »).
+	// Aucune mise à jour n'y est lancée depuis PatchWarden (elle le couperait).
+	// Vide : l'invité dont le nom égale le nom d'hôte de PatchWarden.
+	SelfGuest string `toml:"self_guest"`
 }
 
 // Inventory règle la lecture de l'inventaire.
@@ -153,6 +157,7 @@ type Inventory struct {
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	selfRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]*/[1-9][0-9]*$`)
 	tokenIDRe = regexp.MustCompile(`^[^@!\s]+@[^@!\s]+![A-Za-z][A-Za-z0-9._-]*$`)
 )
 
@@ -336,6 +341,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Inventory.Timeout.Duration <= 0 {
 		add("inventory.timeout doit être positif")
+	}
+	if c.Policy.SelfGuest != "" && !selfRe.MatchString(c.Policy.SelfGuest) {
+		add("policy.self_guest : format « nœud/vmid » attendu (ex. loki/103), obtenu %q", c.Policy.SelfGuest)
 	}
 	if c.SSH.Enabled() {
 		if c.SSH.KeyFile == "" {

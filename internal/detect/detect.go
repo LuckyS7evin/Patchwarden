@@ -81,15 +81,18 @@ func (c CS) Present() bool { return c.Script != "" }
 
 // Apt résume l'état apt.
 type Apt struct {
-	Present        bool      `json:"present"`
-	RefreshRC      *int      `json:"refresh_rc,omitempty"`
-	RefreshErrors  []string  `json:"refresh_errors,omitempty"`
-	IndexAgeHours  int       `json:"index_age_h"` // -1 si inconnu
-	Total          int       `json:"total"`
-	Security       int       `json:"security"`
-	SecurityStrict int       `json:"security_strict"`
-	SecurityRepo   bool      `json:"security_repo"`
-	UpgradeSimple  int       `json:"upgrade_simple"`
+	Present        bool     `json:"present"`
+	RefreshRC      *int     `json:"refresh_rc,omitempty"`
+	RefreshErrors  []string `json:"refresh_errors,omitempty"`
+	IndexAgeHours  int      `json:"index_age_h"` // -1 si inconnu
+	Total          int      `json:"total"`
+	Security       int      `json:"security"`
+	SecurityStrict int      `json:"security_strict"`
+	SecurityRepo   bool     `json:"security_repo"`
+	UpgradeSimple  int      `json:"upgrade_simple"`
+	// DistTotal : paquets qu'un dist-upgrade installerait (il peut supprimer
+	// des paquets) ; PatchWarden ne l'utilise jamais.
+	DistTotal      int       `json:"dist_total"`
 	Packages       []Package `json:"packages"`
 	StrictPackages []string  `json:"strict_packages"`
 }
@@ -182,6 +185,8 @@ func Parse(lines []string) (Result, error) {
 			r.Apt.Security = atoi(v)
 		case "apt.upgrade_simple":
 			r.Apt.UpgradeSimple = atoi(v)
+		case "apt.dist_total":
+			r.Apt.DistTotal = atoi(v)
 		case "apt.security_repo":
 			r.Apt.SecurityRepo = v == "1"
 		case "apt.strict_pkg":

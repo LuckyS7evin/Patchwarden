@@ -24,6 +24,45 @@
 {{end}}
 
 {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="alert alert-info">{{.Notice}}</p>{{end}}
+
+{{if .Plans}}
+<section class="card">
+  <h2>Mettre à jour</h2>
+  <div class="actions-grid">
+  {{range .Plans}}
+    <div class="action-box">
+      {{if .OK}}<a class="btn btn-primary" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}">{{.Action.Label}}…</a>
+      {{else}}<span class="btn btn-disabled" aria-disabled="true">{{.Action.Label}}</span>{{end}}
+      <ul class="small">
+        {{if .OK}}{{range .Steps}}<li>{{.}}</li>{{end}}{{else}}{{range .Blockers}}<li class="muted">{{.}}</li>{{end}}{{end}}
+      </ul>
+    </div>
+  {{end}}
+  </div>
+  <p class="muted small">Un clic ouvre une page de confirmation avec le détail et un bouton « Simuler ». Rien n'est lancé sans confirmation.</p>
+</section>
+{{end}}
+
+{{if .Answers}}
+<section class="card">
+  <h2>Questions posées par le script</h2>
+  <p class="small">Sans terminal, une question sans réponse fait échouer la mise à jour de l'application en plein milieu. Choisissez la réponse que PatchWarden donnera à chaque fois :</p>
+  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/reponses">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{range $i, $a := .Answers}}
+    <fieldset class="answer">
+      <legend>« {{$a.Prompt}} »</legend>
+      <label><input type="radio" name="r{{$i}}" value="y" required {{if and $a.Set (eq $a.Value "y")}}checked{{end}}> oui</label>
+      <label><input type="radio" name="r{{$i}}" value="n" {{if and $a.Set (eq $a.Value "n")}}checked{{end}}> non</label>
+      <label><input type="radio" name="r{{$i}}" value="defaut" {{if and $a.Set (eq $a.Value "")}}checked{{end}}> réponse par défaut (Entrée)</label>
+      {{if not $a.Set}}<span class="badge badge-crit">à renseigner</span>{{end}}
+    </fieldset>
+    {{end}}
+    <button type="submit" class="btn">Enregistrer les réponses</button>
+  </form>
+</section>
+{{end}}
 
 {{with .Row.Det}}
 <section class="card">
@@ -50,7 +89,7 @@
     {{if .CS.NeedCPU}}<dt>Exigé par le script</dt><dd>{{.CS.NeedCPU}} CPU · {{.CS.NeedRAMMB}} Mo
       {{if or (lt .Nproc .CS.NeedCPU) (lt .MemMB .CS.NeedRAMMB)}} <span class="badge badge-warn">supérieur au CT : augmentation temporaire nécessaire pour la mise à jour</span>{{end}}</dd>{{end}}
     {{if .CS.OSOnly}}<dt>Portée</dt><dd>le script ne met à jour que l'OS (apt), pas l'application</dd>{{end}}
-    {{if .CS.Prompts}}<dt>Questions sans terminal</dt><dd>{{range .CS.Prompts}}<span class="badge badge-crit">« {{.}} »</span> {{end}}<br><span class="muted small">Une réponse devra être enregistrée pour cet invité avant toute mise à jour de l'application.</span></dd>{{end}}
+    {{if .CS.Prompts}}<dt>Questions sans terminal</dt><dd>{{range .CS.Prompts}}<span class="badge badge-warn">« {{.}} »</span> {{end}}<br><span class="muted small">Réponses à enregistrer plus haut, avant toute mise à jour de l'application.</span></dd>{{end}}
   </dl>
   {{if .Apps}}
   <div class="tablewrap">

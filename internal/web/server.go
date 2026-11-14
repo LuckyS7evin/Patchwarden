@@ -16,6 +16,7 @@ import (
 
 	"github.com/LuckyS7evin/patchwarden/internal/config"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
+	"github.com/LuckyS7evin/patchwarden/internal/engine"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 )
@@ -29,11 +30,14 @@ type Inventory interface {
 	TriggerRefresh()
 }
 
-// Engine lance les tâches (détection, puis mises à jour).
+// Engine lance les tâches (détection, mises à jour).
 type Engine interface {
 	CanDetect(g inventory.Guest) error
 	Detect(g inventory.Guest, user string) (jobs.Job, error)
 	DetectAll(guests []inventory.Guest, user string) (started, skipped int)
+	PlanFor(g inventory.Guest, a engine.Action) engine.Plan
+	Execute(g inventory.Guest, a engine.Action, dryRun bool, user string, confirmed bool, typedName string) (jobs.Job, error)
+	SetAnswers(key string, answers map[string]string) error
 }
 
 // Jobs donne accès aux tâches et à leur journal.
@@ -80,6 +84,16 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		"age":   func(t time.Time) string { return humanAge(s.now().Sub(t)) },
 		"clock": func(t time.Time) string { return t.Local().Format("15:04:05") },
 		"date":  func(t time.Time) string { return t.Local().Format("02/01/2006 15:04") },
+		"answerLabel": func(v string) string {
+			switch v {
+			case "y":
+				return "oui"
+			case "n":
+				return "non"
+			default:
+				return "réponse par défaut (Entrée)"
+			}
+		},
 		"statusLabel": func(st string) string {
 			switch st {
 			case "running":
@@ -108,7 +122,7 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		},
 	}
 	s.pages = map[string]*template.Template{}
-	for _, p := range []string{"connexion", "inventaire", "invite", "taches", "tache"} {
+	for _, p := range []string{"connexion", "inventaire", "invite", "taches", "tache", "action"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+p+".html")
 		if err != nil {
 			return nil, fmt.Errorf("gabarit %s : %w", p, err)
@@ -132,6 +146,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /inventaire/detecter", s.sameOrigin(s.authed(s.csrf(s.detectAll))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}", s.authed(s.guestPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/detecter", s.sameOrigin(s.authed(s.csrf(s.detectOne))))
+	mux.HandleFunc("GET /invites/{node}/{vmid}/action/{action}", s.authed(s.actionPage))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/action/{action}", s.sameOrigin(s.authed(s.csrf(s.actionSubmit))))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/reponses", s.sameOrigin(s.authed(s.csrf(s.saveAnswers))))
 	mux.HandleFunc("GET /taches", s.authed(s.jobsPage))
 	mux.HandleFunc("GET /taches/{id}", s.authed(s.jobPage))
 	mux.HandleFunc("GET /taches/{id}/flux", s.authed(s.jobStream))

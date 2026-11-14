@@ -30,6 +30,7 @@ import (
 const fakePct = `#!/bin/bash
 case "$1" in
 status) [ "$2" = 108 ] && echo "status: stopped" || echo "status: running" ;;
+set) shift 2; echo "pct set $*" >> "$PCT_SET_LOG"; exit 0 ;;
 exec)
 	shift 2; [ "$1" = "--" ] && shift
 	script="$(cat | sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g")"
@@ -40,15 +41,31 @@ esac
 `
 
 const fakeApt = `#!/bin/bash
-case "$*" in *" update"*|"update -q") sleep "${FAKE_APT_SLEEP:-0}"; echo "Hit:1 http://deb.debian.org/debian trixie InRelease"; exit 0 ;; esac
+echo "[apt-get $*]"
+case "$1" in update) exit 0 ;; esac
+case "$*" in *autoclean*) exit 0 ;; esac
 if [[ "$*" == *SourceList* ]]; then
 	echo "Inst libssl3t64 [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [amd64])"
-elif [[ "$*" == *dist-upgrade* ]]; then
+	echo "1 upgraded, 0 newly installed, 0 to remove and 1 not upgraded."
+elif [[ "$*" == *dist-upgrade* || "$*" == *--with-new-pkgs* ]]; then
 	echo "Inst base-files [13.8+deb13u6] (13.8+deb13u7 Debian:13.7/stable [amd64])"
 	echo "Inst libssl3t64 [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [amd64])"
+	echo "2 upgraded, 0 newly installed, 0 to remove and 0 not upgraded."
 else
 	echo "Inst base-files [13.8+deb13u6] (13.8+deb13u7 Debian:13.7/stable [amd64])"
 fi
+`
+
+// Faux « update » community-scripts : écrit son journal détaillé comme le
+// moteur (/tmp/create-lxc-*.log), lit une réponse, sort avec FAKE_UPDATE_RC.
+const fakeUpdate = `#!/bin/sh
+echo "BANNIERE"
+L=/tmp/create-lxc-pwtest-$$.log
+echo "[INFO] Updating Termix" > "$L"
+read -r REP
+echo "[INFO] réponse reçue : '$REP'" >> "$L"
+echo "[OK] Updated successfully!" >> "$L"
+exit ${FAKE_UPDATE_RC:-0}
 `
 
 func writeExec(t *testing.T, path, body string) {
@@ -64,6 +81,7 @@ type env struct {
 	guest  inventory.Guest
 	base   string // base des scripts servie par le faux site
 	web    *httptest.Server
+	root   string
 }
 
 func setup(t *testing.T) *env {
@@ -76,10 +94,11 @@ func setup(t *testing.T) *env {
 		}
 	}
 	for _, id := range []string{"104", "108"} {
-		if err := os.WriteFile(filepath.Join(pve, "nodes", "loki", "lxc", id+".conf"), nil, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(pve, "nodes", "loki", "lxc", id+".conf"), []byte("cores: 2\nmemory: 2048\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+	writeExec(t, filepath.Join(bin, "update"), fakeUpdate)
 	writeExec(t, filepath.Join(bin, "pct"), fakePct)
 	writeExec(t, filepath.Join(bin, "apt-get"), fakeApt)
 	writeExec(t, filepath.Join(bin, "hostname"), "#!/bin/sh\necho loki\n")
@@ -117,6 +136,7 @@ func setup(t *testing.T) *env {
 		cmd := exec.Command("bash", wrapper)
 		cmd.Env = append(os.Environ(),
 			"SSH_ORIGINAL_COMMAND="+command, "PATCHWARDEN_PVE_DIR="+pve, "FAKE_GUEST="+guest,
+			"PATCHWARDEN_LOG_DIR="+filepath.Join(root, "nodelogs"), "PATCHWARDEN_LOCK_DIR="+root, "PCT_SET_LOG="+filepath.Join(root, "pctset.log"),
 			"PATH="+bin+":"+os.Getenv("PATH"))
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		if err := cmd.Run(); err != nil {
@@ -136,6 +156,10 @@ func setup(t *testing.T) *env {
 	}
 	t.Cleanup(jm.Close)
 	store, _ := detect.OpenStore(data)
+	answers, err := OpenAnswers(data)
+	if err != nil {
+		t.Fatal(err)
+	}
 	up := upstream.New("", time.Hour, web.Client())
 	up.GitHubAPI = web.URL + "/gh"
 	nodes := map[string]string{"loki": srv.Addr}
@@ -144,8 +168,9 @@ func setup(t *testing.T) *env {
 		Runner: runner, HasNode: runner.HasNode, Jobs: jm, Store: store,
 		Scripts: cs.NewFetcher([]string{base}, time.Hour, web.Client()), Upstream: up,
 		Website: "https://community-scripts.org", AptRefresh: true, Timeout: time.Minute, Log: log,
+		Answers: answers, SelfGuest: "loki/103",
 	}
-	return &env{eng: eng, server: srv, base: base, web: web, guest: inventory.Guest{Node: "loki", Type: "lxc", VMID: 104, Name: "termix", Status: "running", CommunityScript: true}}
+	return &env{eng: eng, server: srv, base: base, web: web, root: root, guest: inventory.Guest{Node: "loki", Type: "lxc", VMID: 104, Name: "termix", Status: "running", CommunityScript: true}}
 }
 
 func wait(t *testing.T, m *jobs.Manager, id string) jobs.Job {

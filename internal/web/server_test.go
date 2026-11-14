@@ -16,6 +16,7 @@ import (
 
 	"github.com/LuckyS7evin/patchwarden/internal/config"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
+	"github.com/LuckyS7evin/patchwarden/internal/engine"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"golang.org/x/crypto/bcrypt"
@@ -25,7 +26,47 @@ import (
 type fakeEngine struct {
 	jm      *jobs.Manager
 	release chan struct{}
+	answers map[string]map[string]string
 }
+
+func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
+	p := engine.Plan{Action: a, Guest: g, NeedName: g.Critical, Steps: []string{"apt-get update", "apt-get --with-new-pkgs upgrade : 3 paquet(s)"}}
+	if a == engine.ActFull && g.CommunityScript {
+		saved := f.answers[g.Key()]
+		v, ok := saved[nginxQ]
+		p.CSRun = true
+		p.Answers = []engine.PromptAnswer{{Prompt: nginxQ, Value: v, Set: ok}}
+		if !ok {
+			p.Blockers = []string{"le script pose des questions sans terminal : enregistrez une réponse pour chacune (page de l'invité)"}
+		}
+	}
+	return p
+}
+
+func (f *fakeEngine) Execute(g inventory.Guest, a engine.Action, dry bool, user string, confirmed bool, name string) (jobs.Job, error) {
+	p := f.PlanFor(g, a)
+	if !p.OK() {
+		return jobs.Job{}, errors.New(p.Blockers[0])
+	}
+	if !dry && (!confirmed || (p.NeedName && name != g.Name)) {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(a.Kind(), t, dry, user, func(_ context.Context, _ jobs.Job, log jobs.Logger) (string, error) {
+		log(false, "▶ lxc-apt")
+		return "apt : 3 paquet(s)", nil
+	})
+}
+
+func (f *fakeEngine) SetAnswers(key string, a map[string]string) error {
+	if f.answers == nil {
+		f.answers = map[string]map[string]string{}
+	}
+	f.answers[key] = a
+	return nil
+}
+
+const nginxQ = "Update Nginx configuration? [Y/n]:"
 
 func (f *fakeEngine) CanDetect(g inventory.Guest) error {
 	if g.Type != "lxc" || g.Status != "running" {
@@ -395,5 +436,88 @@ func TestGuestPage(t *testing.T) {
 	}
 	if resp, _ := h.do("GET", "/invites/loki/9999", nil, nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("invité inconnu : %d", resp.StatusCode)
+	}
+}
+
+func TestUpdateFlow(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, CS: detect.CS{Script: "termix", Prompts: []string{nginxQ}}, Apt: detect.Apt{Present: true}})
+
+	_, page := h.do("GET", "/invites/loki/104", nil, nil)
+	for _, want := range []string{"Mettre à jour", `href="/invites/loki/104/action/securite"`, "btn-disabled", "à renseigner", nginxQ} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page invité sans %q", want)
+		}
+	}
+	tok := h.csrf()
+
+	// Réponses : toutes obligatoires, puis enregistrées.
+	resp, _ := h.do("POST", "/invites/loki/104/reponses", url.Values{"csrf": {tok}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "erreur=") {
+		t.Errorf("réponse manquante acceptée : %s", resp.Header.Get("Location"))
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/reponses", url.Values{"csrf": {tok}, "r0": {"n"}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "info=") || h.eng.answers["loki/104"][nginxQ] != "n" {
+		t.Errorf("réponses non enregistrées : %s %v", resp.Header.Get("Location"), h.eng.answers)
+	}
+
+	// Page de confirmation.
+	_, conf := h.do("GET", "/invites/loki/104/action/complet", nil, nil)
+	for _, want := range []string{"Ce qui sera fait", "apt-get --with-new-pkgs upgrade", "Simuler", "Appliquer", `name="confirme"`, "non</strong>"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("confirmation sans %q", want)
+		}
+	}
+	if strings.Contains(conf, `name="nom"`) {
+		t.Error("le nom n'est demandé que pour un invité critique")
+	}
+	if resp, _ := h.do("GET", "/invites/loki/104/action/nimportequoi", nil, nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("action inconnue : %d", resp.StatusCode)
+	}
+
+	// Appliquer sans cocher : refusé, aucune tâche.
+	resp, _ = h.do("POST", "/invites/loki/104/action/complet", url.Values{"csrf": {tok}, "simulation": {"0"}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "/action/complet?erreur=") || len(h.jm.List("", 0)) != 0 {
+		t.Errorf("application sans confirmation : %s", resp.Header.Get("Location"))
+	}
+	// Simulation : pas de confirmation nécessaire.
+	resp, _ = h.do("POST", "/invites/loki/104/action/complet", url.Values{"csrf": {tok}, "simulation": {"1"}}, nil)
+	id := strings.TrimPrefix(resp.Header.Get("Location"), "/taches/")
+	if j := h.waitJob(id); !j.DryRun || j.Kind != jobs.KindFull {
+		t.Errorf("simulation : %+v", j)
+	}
+	_, jp := h.do("GET", "/taches/"+id, nil, nil)
+	if !strings.Contains(jp, "tout mettre à jour (simulation)") {
+		t.Error("la page de tâche doit indiquer la simulation")
+	}
+	// Application confirmée.
+	resp, _ = h.do("POST", "/invites/loki/104/action/complet", url.Values{"csrf": {tok}, "simulation": {"0"}, "confirme": {"1"}}, nil)
+	id = strings.TrimPrefix(resp.Header.Get("Location"), "/taches/")
+	if j := h.waitJob(id); j.DryRun || j.Status != jobs.Success {
+		t.Errorf("application : %+v", j)
+	}
+	// Sans jeton CSRF : refusé.
+	if resp, _ := h.do("POST", "/invites/loki/104/action/securite", url.Values{"simulation": {"1"}}, nil); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("sans CSRF : %d", resp.StatusCode)
+	}
+}
+
+func TestCriticalConfirmation(t *testing.T) {
+	h := newHarness(t)
+	h.inv.snap.Guests = append(h.inv.snap.Guests, inventory.Guest{Node: "tyr", Type: "lxc", VMID: 403, Name: "omv", Status: "running", Critical: true, CriticalReason: "nom contenant « omv »"})
+	h.login()
+	_, conf := h.do("GET", "/invites/tyr/403/action/securite", nil, nil)
+	if !strings.Contains(conf, `name="nom"`) || !strings.Contains(conf, "invité critique") {
+		t.Error("le nom doit être demandé pour un invité critique")
+	}
+	tok := h.csrf()
+	resp, _ := h.do("POST", "/invites/tyr/403/action/securite", url.Values{"csrf": {tok}, "simulation": {"0"}, "confirme": {"1"}, "nom": {"autre"}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "erreur=") {
+		t.Errorf("mauvais nom accepté : %s", resp.Header.Get("Location"))
+	}
+	resp, _ = h.do("POST", "/invites/tyr/403/action/securite", url.Values{"csrf": {tok}, "simulation": {"0"}, "confirme": {"1"}, "nom": {"omv"}}, nil)
+	if !strings.HasPrefix(resp.Header.Get("Location"), "/taches/") {
+		t.Errorf("bon nom refusé : %s", resp.Header.Get("Location"))
 	}
 }

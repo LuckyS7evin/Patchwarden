@@ -40,7 +40,9 @@ type Kind string
 
 // Types de tâches.
 const (
-	KindDetect Kind = "détection"
+	KindDetect   Kind = "détection"
+	KindSecurity Kind = "sécurité uniquement"
+	KindFull     Kind = "tout mettre à jour"
 )
 
 // Target est l'invité visé.

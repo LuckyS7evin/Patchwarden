@@ -1,0 +1,62 @@
+{{define "content"}}
+{{with .Plan}}
+<p class="crumbs"><a href="/">Inventaire</a> › <a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{.Guest.Name}}</a></p>
+<div class="pagehead">
+  <div>
+    <h1>{{.Action.Label}} · {{.Guest.Name}} <span class="muted">· LXC {{.Guest.VMID}} sur {{.Guest.Node}}</span></h1>
+    {{with .Det}}<p class="muted">D'après la détection {{age .At}} ({{date .At}}). <a href="/taches/{{.JobID}}">journal</a></p>{{end}}
+  </div>
+  {{if .Guest.Critical}}<span class="badge badge-big badge-crit">invité critique</span>{{end}}
+</div>
+{{end}}
+
+{{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+
+{{with .Plan}}
+{{if .Blockers}}
+<section class="card">
+  <h2>Action impossible pour l'instant</h2>
+  <ul>{{range .Blockers}}<li class="crit">{{.}}</li>{{end}}</ul>
+  <p><a class="btn" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">Retour à l'invité</a></p>
+</section>
+{{else}}
+<section class="card">
+  <h2>Ce qui sera fait</h2>
+  <ol class="steps">{{range .Steps}}<li>{{.}}</li>{{end}}</ol>
+  {{range .Warnings}}<p class="alert alert-warn">{{.}}</p>{{end}}
+  {{if .CSRun}}{{range .Answers}}<p class="small">Réponse à « {{.Prompt}} » : <strong>{{answerLabel .Value}}</strong></p>{{end}}{{end}}
+  {{if .Packages}}
+  <details><summary>Paquets apt ({{len .Packages}})</summary>
+    <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th><th></th></tr></thead><tbody>
+    {{range .Packages}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td><td>{{if .Security}}<span class="badge badge-crit">sécurité</span>{{end}}</td></tr>{{end}}
+    </tbody></table></div>
+  </details>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>Lancer</h2>
+  <div class="launch">
+    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="simulation" value="1">
+      <button type="submit" class="btn">Simuler</button>
+      <p class="muted small">apt en simulation (<code>apt-get -s</code>) ; l'update community-scripts n'a pas de mode simulation : il est seulement décrit. Rien n'est modifié.</p>
+    </form>
+    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="apply">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="simulation" value="0">
+      <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : appliquer « {{.Action.Label}} » à <strong>{{.Guest.Name}}</strong></label>
+      {{if .NeedName}}
+      <label>Invité critique : saisissez son nom (<code>{{.Guest.Name}}</code>)
+        <input name="nom" required autocomplete="off" pattern="{{.Guest.Name}}">
+      </label>
+      {{end}}
+      <button type="submit" class="btn btn-danger">Appliquer</button>
+    </form>
+  </div>
+  <p class="muted small">Pas de snapshot automatique pour l'instant (prochain jalon) : pensez à votre sauvegarde PBS ou à un snapshot manuel pour les invités sensibles.</p>
+</section>
+{{end}}
+{{end}}
+{{end}}

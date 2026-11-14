@@ -12,10 +12,17 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 1) :
-#   ping                              version du wrapper et nom du nœud
-#   lxc-detect <vmid> <0|1>           détection dans un LXC démarré (1 = apt-get update avant)
-#   lxc-versions <vmid> <app>...      contenu des fichiers /root/.<app> (versions community-scripts)
+# Verbes (version 2) :
+#   ping                                   version du wrapper et nom du nœud
+#   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
+#   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
+#   lxc-apt <vmid> <security|full> <0|1>   mise à jour apt (1 = simulation, rien n'est modifié)
+#   lxc-cs-update <vmid> <réponses> <cpu> <ram_mo>
+#                                          commande `update` community-scripts, sans terminal ;
+#                                          <réponses> : « - » ou y/n/_ séparés par des points
+#                                          (une ligne par question, _ = Entrée) ; <cpu>/<ram_mo> :
+#                                          minimum exigé par le script (0 = rien), appliqué
+#                                          temporairement puis restauré, même en cas d'échec.
 #
 # Codes de sortie : 0 succès, 2 requête refusée, 3 invité non démarré,
 # autre : code renvoyé par la commande exécutée dans l'invité.
@@ -24,13 +31,25 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=1
+WRAPPER_VERSION=2
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
+TIMEOUT_UPDATE=3600
 # Racine de pmxcfs. Modifiable uniquement pour les tests : un client SSH ne peut
 # pas transmettre cette variable (sshd n'accepte par défaut que LANG et LC_*).
 PVE_DIR="${PATCHWARDEN_PVE_DIR:-/etc/pve}"
+LOG_DIR="${PATCHWARDEN_LOG_DIR:-/var/log/patchwarden}"
+LOCK_DIR="${PATCHWARDEN_LOCK_DIR:-/run/lock}"
+SELF="$(readlink -f "$0")"
+# « --detache » : relance locale par run_detached ; jamais accessible à la clé
+# SSH, dont la commande forcée ne transmet aucun argument.
+DETACHED=0
+[[ "${1:-}" == "--detache" ]] && DETACHED=1
+VMID=""
+ORIG_CORES=""
+ORIG_MEM=""
+BUMP=0
 
 log() { logger -t patchwarden -- "$*" 2>/dev/null || true; }
 refuse() {
@@ -56,6 +75,31 @@ check_ct() {
 		exit 3
 	fi
 }
+
+# ------------------------------------------------------------------------------
+# Fonction commune aux scripts d'invité : crée dans $1 une liste de sources apt
+# restreinte aux dépôts *-security (formats .list et deb822 .sources).
+# Renvoie 1 si aucun dépôt de sécurité n'est configuré.
+# ------------------------------------------------------------------------------
+read -r -d '' SECSRC <<'SECSRC_EOF'
+pw_security_sources() {
+	mkdir -p "$1/parts"
+	grep -hsE '^[[:space:]]*deb[[:space:]].*-security' /etc/apt/sources.list /etc/apt/sources.list.d/*.list >"$1/sources.list"
+	for f in /etc/apt/sources.list.d/*.sources; do
+		[ -f "$f" ] || continue
+		awk 'BEGIN { RS = ""; ORS = "" }
+			{ n = split($0, L, "\n"); out = ""; keep = 0; off = 0
+			  for (i = 1; i <= n; i++) {
+			    if (L[i] ~ /^Enabled:[ \t]*no/) off = 1
+			    if (L[i] ~ /^Suites:/) { m = split(L[i], W, /[ \t]+/); s = "Suites:"
+			      for (j = 2; j <= m; j++) if (W[j] ~ /-security$/) { s = s " " W[j]; keep = 1 }
+			      L[i] = s }
+			    out = out L[i] "\n" }
+			  if (keep && !off) print out "\n" }' "$f" >"$1/parts/$(basename "$f")"
+	done
+	[ -s "$1/sources.list" ] || [ -n "$(cat "$1"/parts/* 2>/dev/null)" ]
+}
+SECSRC_EOF
 
 # ------------------------------------------------------------------------------
 # Script de détection exécuté DANS le LXC (POSIX sh, sortie clé=valeur).
@@ -116,7 +160,8 @@ if has apt-get; then
 	if [ -n "$newest" ]; then kv apt.index_age_h "$(( ($(date +%s) - ${newest%.*}) / 3600 ))"; fi
 
 	# Une ligne par paquet : nom, version installée (- si nouveau), nouvelle version, 1 si sécurité.
-	apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | awk '
+	# Même commande que la mise à jour réelle (lxc-apt) : jamais de suppression.
+	apt-get -s -o Debug::NoLocking=1 --with-new-pkgs upgrade 2>/dev/null | awk '
 		/^Inst / {
 			name = $2; old = "-"
 			if ($3 ~ /^\[/) { old = $3; gsub(/\[|\]/, "", old) }
@@ -129,27 +174,15 @@ if has apt-get; then
 		}
 		END { print "apt.total=" n + 0; print "apt.security=" s + 0 }'
 	kv apt.upgrade_simple "$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst ')"
+	# Paquets que seul un dist-upgrade installerait (il peut supprimer des paquets) : non appliqués.
+	kv apt.dist_total "$(apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | grep -c '^Inst ')"
 
 	# Simulation « sécurité seule » stricte : uniquement les dépôts *-security.
 	tmp="$(mktemp -d /tmp/.pw-detect.XXXXXX)"
-	mkdir -p "$tmp/parts"
-	grep -hsE '^[[:space:]]*deb[[:space:]].*-security' /etc/apt/sources.list /etc/apt/sources.list.d/*.list >"$tmp/sources.list"
-	for f in /etc/apt/sources.list.d/*.sources; do
-		[ -f "$f" ] || continue
-		awk 'BEGIN { RS = ""; ORS = "" }
-			{ n = split($0, L, "\n"); out = ""; keep = 0; off = 0
-			  for (i = 1; i <= n; i++) {
-			    if (L[i] ~ /^Enabled:[ \t]*no/) off = 1
-			    if (L[i] ~ /^Suites:/) { m = split(L[i], W, /[ \t]+/); s = "Suites:"
-			      for (j = 2; j <= m; j++) if (W[j] ~ /-security$/) { s = s " " W[j]; keep = 1 }
-			      L[i] = s }
-			    out = out L[i] "\n" }
-			  if (keep && !off) print out "\n" }' "$f" >"$tmp/parts/$(basename "$f")"
-	done
-	if [ -s "$tmp/sources.list" ] || [ -n "$(cat "$tmp"/parts/* 2>/dev/null)" ]; then
+	if pw_security_sources "$tmp"; then
 		kv apt.security_repo 1
 		apt-get -s -o Debug::NoLocking=1 -o Dir::Etc::SourceList="$tmp/sources.list" \
-			-o Dir::Etc::SourceParts="$tmp/parts" dist-upgrade 2>/dev/null |
+			-o Dir::Etc::SourceParts="$tmp/parts" --with-new-pkgs upgrade 2>/dev/null |
 			awk '/^Inst / { n++; print "apt.strict_pkg=" $2 } END { print "apt.security_strict=" n + 0 }'
 	else
 		kv apt.security_repo 0
@@ -180,6 +213,164 @@ for n in "$@"; do
 done
 VERSIONS_EOF
 
+# ------------------------------------------------------------------------------
+# Mise à jour apt DANS le LXC. $1 = security|full, $2 = 1 pour simuler.
+# Jamais de suppression de paquet (--with-new-pkgs upgrade) ; en cas de conflit
+# de fichier de configuration, la version locale est gardée (confold).
+# ------------------------------------------------------------------------------
+read -r -d '' APTRUN <<'APTRUN_EOF'
+MODE="$1"; DRY="$2"
+export LC_ALL=C DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
+OPTS="-o APT::Color=0 -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+if [ "$DRY" = 1 ]; then
+	echo "PW: simulation (apt-get -s) : rien ne sera modifié ; index apt de la dernière détection"
+	OPTS="$OPTS -s -o Debug::NoLocking=1"
+else
+	echo "PW: apt-get update"
+	apt-get update -o APT::Color=0 -o DPkg::Lock::Timeout=300 || echo "PW-AVERTISSEMENT: apt-get update a signalé des erreurs, la mise à jour continue avec l'index disponible"
+fi
+tmp=""
+if [ "$MODE" = security ]; then
+	tmp="$(mktemp -d /tmp/.pw-apt.XXXXXX)"
+	if ! pw_security_sources "$tmp"; then
+		rm -rf "$tmp"
+		echo "PW-ERREUR: aucun dépôt de sécurité configuré dans cet invité"
+		exit 21
+	fi
+	echo "PW: dépôts utilisés (sécurité uniquement) :"
+	cat "$tmp/sources.list" "$tmp"/parts/* 2>/dev/null | grep -E '^(deb |URIs:|Suites:)' | sed 's/^/PW:   /'
+	OPTS="$OPTS -o Dir::Etc::SourceList=$tmp/sources.list -o Dir::Etc::SourceParts=$tmp/parts"
+fi
+echo "PW: apt-get --with-new-pkgs upgrade"
+# shellcheck disable=SC2086
+apt-get $OPTS -y --with-new-pkgs upgrade
+rc=$?
+[ -n "$tmp" ] && rm -rf "$tmp"
+if [ "$DRY" != 1 ] && [ "$rc" = 0 ]; then
+	apt-get -o APT::Color=0 -y autoclean >/dev/null 2>&1
+fi
+if [ -e /var/run/reboot-required ]; then echo "pw.reboot_required=1"; fi
+echo "pw.apt_rc=$rc"
+exit "$rc"
+APTRUN_EOF
+
+# ------------------------------------------------------------------------------
+# Commande `update` community-scripts DANS le LXC, sans terminal. $1 = réponses.
+# Le journal détaillé du moteur (/tmp/create-lxc-*.log, nom aléatoire) est
+# repéré puis suivi en direct ; la sortie standard de `update` (bannière,
+# erreurs précoces) est affichée à la fin.
+# ------------------------------------------------------------------------------
+read -r -d '' CSUPDATE <<'CSUPDATE_EOF'
+ANS="$1"
+if [ ! -x /usr/bin/update ]; then echo "PW-ERREUR: /usr/bin/update absent"; exit 30; fi
+marker="$(mktemp /tmp/.pw-marker.XXXXXX)"
+out="$(mktemp /tmp/.pw-update-out.XXXXXX)"
+inp="$(mktemp /tmp/.pw-update-in.XXXXXX)"
+if [ "$ANS" = "-" ]; then : >"$inp"; else printf '%s\n' "$ANS" | tr '.' '\n' | sed 's/^_$//' >"$inp"; fi
+sleep 1
+echo "PW: lancement de update (PHS_SILENT=1)"
+( PHS_SILENT=1 TERM=dumb update <"$inp" >"$out" 2>&1; echo $? >"$out.rc" ) &
+pid=$!
+log=""
+i=0
+while [ -z "$log" ] && kill -0 "$pid" 2>/dev/null && [ "$i" -lt 180 ]; do
+	log="$(find /tmp -maxdepth 1 -name 'create-lxc-*.log' -newer "$marker" 2>/dev/null | head -n 1)"
+	[ -z "$log" ] && sleep 1
+	i=$((i + 1))
+done
+[ -z "$log" ] && log="$(find /tmp -maxdepth 1 -name 'create-lxc-*.log' -newer "$marker" 2>/dev/null | head -n 1)"
+if [ -n "$log" ]; then
+	echo "PW: journal détaillé : $log"
+	if tail --pid="$$" -n 0 /dev/null 2>/dev/null; then
+		tail -n +1 -f --pid="$pid" "$log"
+	else
+		wait "$pid"
+		cat "$log"
+	fi
+fi
+wait "$pid" 2>/dev/null
+echo "PW: ----- sortie standard de update -----"
+cat "$out"
+rc="$(cat "$out.rc" 2>/dev/null || echo 1)"
+[ -n "$log" ] && rm -f "$log"
+rm -f "$marker" "$out" "$out.rc" "$inp"
+if [ -e /var/run/reboot-required ]; then echo "pw.reboot_required=1"; fi
+echo "pw.update_rc=$rc"
+exit "$rc"
+CSUPDATE_EOF
+
+# ------------------------------------------------------------------------------
+# Exécution détachée des mises à jour réelles. La partie visible (connexion SSH)
+# ne fait que suivre le journal ; le travail tourne dans une nouvelle session,
+# sous verrou par CT : si la connexion est perdue, la mise à jour se termine
+# quand même (et les ressources sont restaurées). Journal gardé 30 jours dans
+# LOG_DIR. Code 99 : une opération PatchWarden est déjà en cours sur ce CT.
+# ------------------------------------------------------------------------------
+run_detached() {
+	local label="$1" fn="$2" logf bg rc
+	if [[ "$DETACHED" == 1 ]]; then
+		"$fn"
+		exit $?
+	fi
+	mkdir -p "$LOG_DIR" && chmod 700 "$LOG_DIR"
+	find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -mtime +30 -delete 2>/dev/null
+	logf="${LOG_DIR}/${VMID}-$(date +%Y%m%d-%H%M%S)-${label}.log"
+	: >"$logf"
+	echo "pw.node_log=${logf}"
+	setsid -w flock -n -E 99 "${LOCK_DIR}/patchwarden-${VMID}.lock" "$SELF" --detache </dev/null >>"$logf" 2>&1 &
+	bg=$!
+	tail -n +1 -f --pid="$bg" "$logf"
+	wait "$bg"
+	rc=$?
+	if [[ "$rc" == 99 ]]; then
+		echo "PW-REFUS: une opération PatchWarden est déjà en cours sur le CT ${VMID}" >&2
+	fi
+	exit "$rc"
+}
+
+run_apt() {
+	log "lxc-apt ${VMID} ${ARGS[2]} simulation=${ARGS[3]}"
+	timeout "$TIMEOUT_UPDATE" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" "${ARGS[3]}" <<<"${SECSRC}
+${APTRUN}"
+}
+
+run_cs_update() {
+	local conf="${PVE_DIR}/nodes/${NODE}/lxc/${VMID}.conf"
+	ORIG_CORES="$(sed -n '/^\[/q;s/^cores: *//p' "$conf")"
+	ORIG_MEM="$(sed -n '/^\[/q;s/^memory: *//p' "$conf")"
+	local new_cores="$ORIG_CORES" new_mem="${ORIG_MEM:-512}"
+	BUMP=0
+	# cores absent = tous les cœurs de l'hôte : rien à augmenter.
+	if [[ -n "$ORIG_CORES" && "${ARGS[3]}" -gt "$ORIG_CORES" ]]; then new_cores="${ARGS[3]}"; BUMP=1; fi
+	if [[ "${ARGS[4]}" -gt "${ORIG_MEM:-512}" ]]; then new_mem="${ARGS[4]}"; BUMP=1; fi
+	if [[ "$BUMP" == 1 ]]; then
+		trap restore_resources EXIT HUP INT TERM PIPE
+		echo "PW: ressources portées temporairement à ${new_cores:-tous les} CPU / ${new_mem} Mo (d'origine : ${ORIG_CORES:-tous les} CPU / ${ORIG_MEM:-512} Mo)"
+		local args=(--memory "$new_mem")
+		[[ "$new_cores" != "$ORIG_CORES" ]] && args+=(--cores "$new_cores")
+		pct set "$VMID" "${args[@]}" || { echo "PW-ERREUR: augmentation des ressources impossible"; exit 31; }
+		log "lxc-cs-update ${VMID} : ressources portées à ${new_cores:-tous les} CPU / ${new_mem} Mo"
+	fi
+	log "lxc-cs-update ${VMID} réponses=${ARGS[2]} cpu=${ARGS[3]} ram=${ARGS[4]}"
+	timeout "$TIMEOUT_UPDATE" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" <<<"$CSUPDATE"
+}
+
+restore_resources() {
+	local rc=$?
+	trap - EXIT HUP INT TERM PIPE
+	local args=()
+	[[ -n "$ORIG_CORES" ]] && args+=(--cores "$ORIG_CORES")
+	if [[ -n "$ORIG_MEM" ]]; then args+=(--memory "$ORIG_MEM"); else args+=(--delete memory); fi
+	if pct set "$VMID" "${args[@]}"; then
+		echo "PW: ressources restaurées : ${ORIG_CORES:-tous les} CPU / ${ORIG_MEM:-512} Mo"
+		log "lxc-cs-update ${VMID} : ressources restaurées"
+	else
+		echo "PW-ALERTE: impossible de restaurer les ressources du CT ${VMID} (${ORIG_CORES:-?} CPU / ${ORIG_MEM:-512} Mo) : à corriger à la main"
+		log "ALERTE : ressources du CT ${VMID} non restaurées"
+	fi
+	exit "$rc"
+}
+
 case "$VERB" in
 ping)
 	[[ ${#ARGS[@]} -eq 1 ]] || refuse "ping ne prend pas d'argument"
@@ -192,7 +383,8 @@ lxc-detect)
 	[[ "${ARGS[2]}" =~ ^[01]$ ]] || refuse "rafraîchissement attendu : 0 ou 1"
 	check_ct "${ARGS[1]}"
 	log "lxc-detect ${ARGS[1]} refresh=${ARGS[2]}"
-	timeout "$TIMEOUT_DETECT" pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[2]}" <<<"$DETECT"
+	timeout "$TIMEOUT_DETECT" pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[2]}" <<<"${SECSRC}
+${DETECT}"
 	exit $?
 	;;
 lxc-versions)
@@ -203,6 +395,28 @@ lxc-versions)
 	check_ct "${ARGS[1]}"
 	timeout 60 pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[@]:2}" <<<"$VERSIONS"
 	exit $?
+	;;
+lxc-apt)
+	[[ ${#ARGS[@]} -eq 4 ]] || refuse "usage : lxc-apt <vmid> <security|full> <0|1>"
+	[[ "${ARGS[2]}" =~ ^(security|full)$ ]] || refuse "mode attendu : security ou full"
+	[[ "${ARGS[3]}" =~ ^[01]$ ]] || refuse "simulation attendue : 0 ou 1"
+	VMID="${ARGS[1]}"
+	check_ct "$VMID"
+	if [[ "${ARGS[3]}" == 1 ]]; then
+		# Simulation : lecture seule et courte, exécutée directement.
+		run_apt
+		exit $?
+	fi
+	run_detached apt run_apt
+	;;
+lxc-cs-update)
+	[[ ${#ARGS[@]} -eq 5 ]] || refuse "usage : lxc-cs-update <vmid> <réponses> <cpu> <ram_mo>"
+	[[ "${ARGS[2]}" =~ ^(-|[yn_](\.[yn_]){0,9})$ ]] || refuse "réponses attendues : - ou y/n/_ séparés par des points"
+	[[ "${ARGS[3]}" =~ ^[0-9]{1,2}$ && "${ARGS[3]}" -le 64 ]] || refuse "cpu attendu : 0 à 64"
+	[[ "${ARGS[4]}" =~ ^[0-9]{1,6}$ && "${ARGS[4]}" -le 262144 ]] || refuse "ram attendue : 0 à 262144 Mo"
+	VMID="${ARGS[1]}"
+	check_ct "$VMID"
+	run_detached cs-update run_cs_update
 	;;
 *)
 	refuse "verbe inconnu : ${VERB}"

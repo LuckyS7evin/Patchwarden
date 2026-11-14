@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
+	"github.com/LuckyS7evin/patchwarden/internal/engine"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 )
@@ -60,9 +61,12 @@ func (s *Server) detectAll(w http.ResponseWriter, r *http.Request, se *session) 
 
 type guestData struct {
 	base
-	Row   row
-	Error string
-	Jobs  []jobs.Job
+	Row     row
+	Error   string
+	Notice  string
+	Jobs    []jobs.Job
+	Plans   []engine.Plan
+	Answers []engine.PromptAnswer
 	// Paquets séparés pour l'affichage.
 	SecurityPkgs, OtherPkgs []detect.Package
 	StrictMissing           int
@@ -75,10 +79,20 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request, se *session) 
 		return
 	}
 	d := guestData{
-		base:  s.base(fmt.Sprintf("%s (%d)", g.Name, g.VMID), "inventaire", se),
-		Row:   s.rowFor(g),
-		Error: r.URL.Query().Get("erreur"),
-		Jobs:  s.deps.Jobs.List(g.Key(), 20),
+		base:   s.base(fmt.Sprintf("%s (%d)", g.Name, g.VMID), "inventaire", se),
+		Row:    s.rowFor(g),
+		Error:  r.URL.Query().Get("erreur"),
+		Notice: r.URL.Query().Get("info"),
+		Jobs:   s.deps.Jobs.List(g.Key(), 20),
+	}
+	if s.deps.Engine.CanDetect(g) == nil {
+		for _, a := range []engine.Action{engine.ActSecurity, engine.ActFull} {
+			p := s.deps.Engine.PlanFor(g, a)
+			d.Plans = append(d.Plans, p)
+			if a == engine.ActFull {
+				d.Answers = p.Answers
+			}
+		}
 	}
 	if det := d.Row.Det; det != nil {
 		for _, p := range det.Apt.Packages {
@@ -205,4 +219,89 @@ func (s *Server) jobStream(w http.ResponseWriter, r *http.Request, _ *session) {
 			return
 		}
 	}
+}
+
+func guestURL(g inventory.Guest) string { return fmt.Sprintf("/invites/%s/%d", g.Node, g.VMID) }
+
+type actionData struct {
+	base
+	Plan  engine.Plan
+	Error string
+}
+
+func (s *Server) actionPage(w http.ResponseWriter, r *http.Request, se *session) {
+	g, ok := s.findGuest(r)
+	if !ok {
+		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
+		return
+	}
+	a, err := engine.ParseAction(r.PathValue("action"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	p := s.deps.Engine.PlanFor(g, a)
+	s.render(w, "action", http.StatusOK, actionData{
+		base: s.base(a.Label()+" · "+g.Name, "inventaire", se), Plan: p, Error: r.URL.Query().Get("erreur"),
+	})
+}
+
+func (s *Server) actionSubmit(w http.ResponseWriter, r *http.Request, se *session) {
+	g, ok := s.findGuest(r)
+	if !ok {
+		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
+		return
+	}
+	a, err := engine.ParseAction(r.PathValue("action"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	dry := r.PostFormValue("simulation") == "1"
+	j, err := s.deps.Engine.Execute(g, a, dry, se.user, r.PostFormValue("confirme") == "1", r.PostFormValue("nom"))
+	if err != nil {
+		if errors.Is(err, jobs.ErrBusy) {
+			if act, ok := s.deps.Jobs.ActiveFor(jobs.Target{Node: g.Node, VMID: g.VMID}); ok {
+				http.Redirect(w, r, "/taches/"+act.ID, http.StatusSeeOther)
+				return
+			}
+		}
+		http.Redirect(w, r, guestURL(g)+"/action/"+string(a)+"?erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.log.Info("mise à jour demandée", "invité", g.Key(), "action", a, "simulation", dry, "tâche", j.ID, "par", se.user)
+	http.Redirect(w, r, "/taches/"+j.ID, http.StatusSeeOther)
+}
+
+// saveAnswers enregistre les réponses aux questions du script de l'invité,
+// dans l'ordre des questions de la dernière détection.
+func (s *Server) saveAnswers(w http.ResponseWriter, r *http.Request, se *session) {
+	g, ok := s.findGuest(r)
+	if !ok {
+		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
+		return
+	}
+	det, ok := s.deps.Detections.Get(g.Key())
+	if !ok || len(det.CS.Prompts) == 0 {
+		http.Redirect(w, r, guestURL(g)+"?erreur="+url.QueryEscape("aucune question à laquelle répondre"), http.StatusSeeOther)
+		return
+	}
+	ans := map[string]string{}
+	for i, q := range det.CS.Prompts {
+		switch v := r.PostFormValue(fmt.Sprintf("r%d", i)); v {
+		case "y", "n":
+			ans[q] = v
+		case "defaut":
+			ans[q] = ""
+		default:
+			http.Redirect(w, r, guestURL(g)+"?erreur="+url.QueryEscape("répondez à chaque question"), http.StatusSeeOther)
+			return
+		}
+	}
+	if err := s.deps.Engine.SetAnswers(g.Key(), ans); err != nil {
+		http.Redirect(w, r, guestURL(g)+"?erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.log.Info("réponses enregistrées", "invité", g.Key(), "par", se.user)
+	http.Redirect(w, r, guestURL(g)+"?info="+url.QueryEscape("Réponses enregistrées."), http.StatusSeeOther)
 }

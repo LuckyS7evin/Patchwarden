@@ -141,6 +141,22 @@ Commande : `pct exec 103 -- env PHS_SILENT=1 TERM=dumb update </dev/null`
 | TYR : `/cluster/resources` renvoie ses invités en `unknown`, sans nom (le nœud ne publie plus leur état, pvestatd probable) | Relecture de `/nodes/<nœud>/lxc` et `/qemu` pour les invités incomplets ; état « inconnu » expliqué ; détection refusée avec la cause |
 | Détection réelle : Dev à jour (75 paquets appliqués au test H5) ; Termix 120 paquets dont 65 de sécurité (65 en mode strict), guacd 1.6.0 à jour, termix `release-2.6.1-tag` → `v26.11.1`, question nginx et 4 CPU / 4 Go exigés repérés ; API GitHub joignable depuis le LAN | — |
 
+## Jalon 3 : mises à jour d'un LXC
+
+| Sujet | Décision |
+| :--- | :--- |
+| Commande apt | `apt-get --with-new-pkgs upgrade` (comme `apt upgrade`) : installe les nouvelles dépendances, ne supprime jamais rien. Les paquets qui n'avancent qu'avec un `dist-upgrade` sont signalés, pas appliqués. La détection simule exactement cette commande |
+| Sécurité uniquement | Même commande avec une liste de sources restreinte aux dépôts `*-security`, après un `apt-get update` **complet** (un `update` sur la liste restreinte effacerait les index des autres dépôts) |
+| Fichiers de configuration | `--force-confdef --force-confold` : la version locale est gardée, comme le fait le moteur community-scripts |
+| `update` community-scripts | Lancé seulement si une version plus récente est publiée (ou si la version est inconnue) ; jamais pour les scripts « OS seul ». `PHS_SILENT=1`, réponses enregistrées sur l'entrée standard ; journal `/tmp/create-lxc-*.log` suivi en direct puis supprimé |
+| Questions sans terminal | Réponse obligatoire, choisie une fois par invité (oui / non / Entrée), avant toute mise à jour de l'appli |
+| Ressources (code 113) | Augmentation puis restauration faites par le wrapper (piège sur EXIT/HUP/TERM/PIPE), pas par PatchWarden en deux appels |
+| Robustesse | Mises à jour réelles détachées sur le nœud (`setsid`, verrou `flock` par CT, journal `/var/log/patchwarden/`, 30 jours) : une coupure SSH ne tue pas `dpkg` |
+| Confirmation | Page de plan obligatoire ; « Simuler » sans confirmation ; « Appliquer » avec case à cocher, plus le nom saisi pour les invités critiques ; détection de moins de 24 h exigée |
+| Invité hôte | Aucune mise à jour sur l'invité qui héberge PatchWarden (`policy.self_guest`, ou même nom d'hôte) |
+| Vérification | Détection relancée en fin de mise à jour, dans la même tâche |
+| Snapshots | Reportés au jalon suivant (comme prévu) ; l'interface le rappelle sur la page de confirmation |
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -141,6 +142,11 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("état de la détection : %w", err)
 	}
+	answers, err := engine.OpenAnswers(cfg.Jobs.DataDir)
+	if err != nil {
+		return fmt.Errorf("réponses aux questions des scripts : %w", err)
+	}
+	hostname, _ := os.Hostname()
 	up := upstream.New(cfg.Upstream.GitHubToken, cfg.Upstream.CacheTTL.Duration, nil)
 	up.GitHubAPI = strings.TrimRight(cfg.Upstream.GitHubAPI, "/")
 	eng := &engine.Engine{
@@ -150,6 +156,9 @@ func serve(args []string) error {
 		Website:    cfg.CS.WebsiteURL,
 		AptRefresh: *cfg.Detection.AptRefresh,
 		Timeout:    cfg.Detection.Timeout.Duration,
+		Answers:    answers,
+		SelfGuest:  cfg.Policy.SelfGuest,
+		Hostname:   hostname,
 	}
 	if cfg.SSH.Enabled() {
 		ex, err := sshx.New(cfg.SSH)
@@ -251,6 +260,16 @@ func checkConfig(args []string) error {
 				fmt.Printf("  ✘ %s : code %d %s\n", node, code, strings.Join(out, " "))
 			default:
 				fmt.Printf("  ✔ %s : %s\n", node, strings.Join(out, " "))
+				v := 0
+				for _, l := range out {
+					if n, ok := strings.CutPrefix(l, "pw.wrapper_version="); ok {
+						v, _ = strconv.Atoi(n)
+					}
+				}
+				if v < engine.WrapperVersion {
+					failed++
+					fmt.Printf("    ✘ wrapper version %d sur %s, version %d attendue : réinstallez deploy/patchwarden-wrapper (README, étape 6)\n", v, node, engine.WrapperVersion)
+				}
 			}
 		}
 	} else {

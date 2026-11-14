@@ -46,6 +46,10 @@ community_script_tag = "community-script"
 critical_tags = ["critique"]
 # … ou par fragment de nom (insensible à la casse).
 special_names = ["omv", "pbs", "proxmox-backup"]
+# Invité qui héberge PatchWarden (« nœud/vmid ») : aucune mise à jour n'y est lancée
+# depuis PatchWarden, elle le couperait en cours de route. Sans ce réglage, l'invité
+# dont le nom égale le nom d'hôte de PatchWarden est considéré comme tel.
+# self_guest = "loki/103"
 
 [inventory]
 refresh = "5m"

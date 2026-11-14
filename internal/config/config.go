@@ -392,8 +392,10 @@ func (c *Config) Validate() error {
 		default:
 			add("notify n° %d : type attendu ntfy, gotify ou webhook, obtenu %q", i+1, n.Type)
 		}
-		if u, err := url.Parse(n.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if u, err := url.Parse(n.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 			add("notify n° %d : url http(s) attendue, obtenu %q", i+1, n.URL)
+		} else if strings.HasSuffix(u.Host, ":") || strings.Contains(u.Path, "://") || strings.HasPrefix(u.Path, "//") {
+			add("notify n° %d : url mal formée %q : un seul préfixe http(s)://, par exemple https://ntfy.sh/mon-sujet", i+1, n.URL)
 		} else if n.Type == "ntfy" && strings.Trim(u.Path, "/") == "" {
 			add("notify n° %d : l'url ntfy doit contenir le sujet (ex. https://ntfy.sh/mon-sujet)", i+1)
 		}

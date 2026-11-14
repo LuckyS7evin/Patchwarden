@@ -216,3 +216,12 @@ url = "https://gotify.lan"
 		}
 	}
 }
+
+func TestNotifyURLDoubled(t *testing.T) {
+	for _, bad := range []string{"https://ntfy://ntfy.sh/sujet", "https://ntfy.sh//sujet"} {
+		body := valid + "\n[[notify]]\ntype = \"ntfy\"\nurl = \"" + bad + "\"\n"
+		if _, _, err := Load(write(t, body, 0o600)); err == nil || !strings.Contains(err.Error(), "un seul préfixe") {
+			t.Errorf("%s : %v", bad, err)
+		}
+	}
+}

@@ -5,6 +5,7 @@
     <p class="muted">
       {{if .Loaded}}Lu {{.Age}} ({{.FetchedAt}}){{else}}Première lecture en cours…{{end}}
       {{if .Refreshing}} · <strong>rafraîchissement en cours</strong>{{end}}
+      {{if .NextDetection}}<br>Prochaine détection automatique : {{.NextDetection}}{{end}}
     </p>
   </div>
   <div class="actions">

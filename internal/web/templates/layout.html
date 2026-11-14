@@ -13,6 +13,7 @@
   {{if .User}}
   <nav class="mainnav">
     <a href="/" {{if eq .Nav "inventaire"}}aria-current="page"{{end}}>Inventaire</a>
+    <a href="/securite" {{if eq .Nav "securite"}}aria-current="page"{{end}}>Sécurité</a>
     <a href="/taches" {{if eq .Nav "taches"}}aria-current="page"{{end}}>Tâches</a>
   </nav>
   <div class="userbox">

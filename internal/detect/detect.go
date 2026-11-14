@@ -19,6 +19,9 @@ type Package struct {
 	Old      string `json:"old"` // "-" si le paquet est nouveau
 	New      string `json:"new"`
 	Security bool   `json:"security"`
+	// Since : première détection où cette mise à jour (nom + nouvelle version)
+	// était proposée ; conservée d'une détection à l'autre.
+	Since time.Time `json:"since,omitempty"`
 }
 
 // App est une application suivie par un script community-scripts.
@@ -32,6 +35,8 @@ type App struct {
 	Latest         string `json:"latest"`
 	LatestError    string `json:"latest_error,omitempty"`
 	ChangelogURL   string `json:"changelog_url"`
+	// Since : première détection où cette dernière version était disponible.
+	Since time.Time `json:"since,omitempty"`
 }
 
 // Status résume la comparaison des versions.
@@ -276,6 +281,7 @@ func (s *Store) All() map[string]Result {
 func (s *Store) Put(key string, r Result) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	carrySince(s.m[key], &r)
 	s.m[key] = r
 	b, err := json.Marshal(s.m)
 	if err != nil {
@@ -286,4 +292,69 @@ func (s *Store) Put(key string, r Result) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// carrySince reporte les dates de première apparition depuis le résultat
+// précédent : une mise à jour toujours en attente garde sa date d'origine, une
+// nouvelle prend la date de la détection.
+func carrySince(prev Result, r *Result) {
+	pk := map[string]time.Time{}
+	for _, p := range prev.Apt.Packages {
+		if !p.Since.IsZero() {
+			pk[p.Name+"="+p.New] = p.Since
+		}
+	}
+	for i := range r.Apt.Packages {
+		p := &r.Apt.Packages[i]
+		if t, ok := pk[p.Name+"="+p.New]; ok {
+			p.Since = t
+		} else if p.Since.IsZero() {
+			p.Since = r.At
+		}
+	}
+	ap := map[string]time.Time{}
+	for _, a := range prev.Apps {
+		if !a.Since.IsZero() {
+			ap[a.Name+"="+a.Latest] = a.Since
+		}
+	}
+	for i := range r.Apps {
+		a := &r.Apps[i]
+		if !a.UpdateAvailable() {
+			continue
+		}
+		if t, ok := ap[a.Name+"="+a.Latest]; ok {
+			a.Since = t
+		} else if a.Since.IsZero() {
+			a.Since = r.At
+		}
+	}
+}
+
+// OldestSecurity renvoie la plus ancienne date d'apparition parmi les
+// correctifs de sécurité en attente (zéro s'il n'y en a pas).
+func (r Result) OldestSecurity() time.Time {
+	var t time.Time
+	for _, p := range r.Apt.Packages {
+		if p.Security && !p.Since.IsZero() && (t.IsZero() || p.Since.Before(t)) {
+			t = p.Since
+		}
+	}
+	return t
+}
+
+// NewSince renvoie les correctifs de sécurité et les nouvelles versions
+// d'applis apparus à partir de t (nouveautés d'une détection).
+func (r Result) NewSince(t time.Time) (security []Package, apps []App) {
+	for _, p := range r.Apt.Packages {
+		if p.Security && !p.Since.Before(t) {
+			security = append(security, p)
+		}
+	}
+	for _, a := range r.Apps {
+		if a.UpdateAvailable() && !a.Since.IsZero() && !a.Since.Before(t) {
+			apps = append(apps, a)
+		}
+	}
+	return security, apps
 }

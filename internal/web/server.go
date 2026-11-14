@@ -52,6 +52,7 @@ type Jobs interface {
 // Detections donne le dernier résultat de détection par invité.
 type Detections interface {
 	Get(key string) (detect.Result, bool)
+	All() map[string]detect.Result
 }
 
 // Deps regroupe ce dont l'interface a besoin en plus de l'inventaire.
@@ -59,6 +60,8 @@ type Deps struct {
 	Engine     Engine
 	Jobs       Jobs
 	Detections Detections
+	// NextDetection renvoie la prochaine détection planifiée (zéro : aucune).
+	NextDetection func() time.Time
 }
 
 // Server porte l'état de l'interface.
@@ -122,7 +125,7 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		},
 	}
 	s.pages = map[string]*template.Template{}
-	for _, p := range []string{"connexion", "inventaire", "invite", "taches", "tache", "action"} {
+	for _, p := range []string{"connexion", "inventaire", "invite", "taches", "tache", "action", "securite"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+p+".html")
 		if err != nil {
 			return nil, fmt.Errorf("gabarit %s : %w", p, err)
@@ -149,6 +152,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /invites/{node}/{vmid}/action/{action}", s.authed(s.actionPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/action/{action}", s.sameOrigin(s.authed(s.csrf(s.actionSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/reponses", s.sameOrigin(s.authed(s.csrf(s.saveAnswers))))
+	mux.HandleFunc("GET /securite", s.authed(s.securityPage))
 	mux.HandleFunc("GET /taches", s.authed(s.jobsPage))
 	mux.HandleFunc("GET /taches/{id}", s.authed(s.jobPage))
 	mux.HandleFunc("GET /taches/{id}/flux", s.authed(s.jobStream))
@@ -376,6 +380,7 @@ type inventoryData struct {
 	base
 	Loaded, Refreshing bool
 	Detectable         int
+	NextDetection      string
 	Age, FetchedAt     string
 	Errors             []string
 	Counts             counts
@@ -394,6 +399,11 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 		base:   s.base("Inventaire", "inventaire", se),
 		Loaded: !snap.FetchedAt.IsZero(), Refreshing: refreshing,
 		Nodes: snap.Nodes(), Filter: f, Query: r.URL.RawQuery,
+	}
+	if s.deps.NextDetection != nil {
+		if t := s.deps.NextDetection(); !t.IsZero() {
+			d.NextDetection = t.Local().Format("02/01 à 15:04")
+		}
 	}
 	if d.Loaded {
 		d.Age = humanAge(s.now().Sub(snap.FetchedAt))

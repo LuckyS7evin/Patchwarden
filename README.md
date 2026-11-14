@@ -13,8 +13,12 @@ de mémoire, sans agent dans les invités.
 | 1 | Configuration, authentification, inventaire de tous les nœuds via l'API (lecture seule) | ✅ |
 | 2 | Wrapper SSH sur les nœuds, tâches asynchrones, journaux en direct, historique, **détection** (apt, appli community-scripts, dernière version, changelog) | ✅ |
 | 3 | Mises à jour d'un LXC : simulation, « Sécurité uniquement », « Tout mettre à jour » (apt + `update` community-scripts), confirmation | ✅ |
-| 4 | Lots, VMs (guest agent), OMV/PBS | à faire |
-| 5 et + | Docker (Portainer), snapshots avant mise à jour, propositions | à faire |
+| 4 | Détection planifiée, notifications (ntfy, Gotify, webhook), vue sécurité | ✅ |
+| 5 | Snapshots avant mise à jour, retour arrière en un clic | à faire |
+| 6 | Lots, regroupement par tags, redémarrages requis | à faire |
+| 7 | VMs (guest agent), OMV/PBS, fin de support des OS | à faire |
+| 8 | Docker (API Portainer) | à faire |
+| 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique, métriques Prometheus | à faire |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -42,6 +46,15 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
   - CPU/RAM exigés par le script : augmentés temporairement par le wrapper puis restaurés,
     même en cas d'échec ;
   - aucune action sur l'invité qui héberge PatchWarden (`policy.self_guest`).
+
+- **détection planifiée** (`[schedule] detect_at`) : chaque jour aux heures choisies, tous les
+  LXC démarrés sont détectés (lecture seule) ; rien n'est jamais mis à jour automatiquement ;
+- **notifications** (ntfy, Gotify, webhook) : un seul message par détection planifiée pour les
+  nouveaux correctifs de sécurité, un pour les nouvelles versions d'applis, un pour les
+  échecs ; fin de chaque mise à jour réelle (réussite ou échec). `patchwarden notify-test`
+  vérifie les cibles ;
+- **vue Sécurité** : correctifs de sécurité en attente par invité, les plus anciens d'abord,
+  et LXC sans détection récente.
 
 Pas encore de snapshot automatique avant mise à jour (prochain jalon) : gardez vos
 sauvegardes PBS à jour pour les invités sensibles.
@@ -214,6 +227,32 @@ ssh -i /etc/patchwarden/id_ed25519 root@192.168.0.141 'ls /'    # PW-REFUS, code
 
 Chaque appel au wrapper est journalisé sur le nœud : `journalctl -t patchwarden`.
 
+### 7. Détection planifiée et notifications (facultatif)
+
+Dans `config.toml` :
+
+```toml
+[server]
+public_url = "http://192.168.0.19:8094"   # pour les liens des notifications
+
+[schedule]
+detect_at = ["03:40"]                     # heures locales, plusieurs possibles
+
+[[notify]]
+type = "ntfy"                             # ntfy, gotify ou webhook
+url = "https://ntfy.sh/mon-sujet-secret"  # ntfy : serveur + sujet
+# token_env = "PATCHWARDEN_NTFY_TOKEN"    # si le sujet est protégé
+events = ["securite", "applis", "echec"]  # + "succes" pour chaque mise à jour réussie
+```
+
+Gotify : `type = "gotify"`, `url` = adresse du serveur, `token_env` = jeton d'application.
+Webhook : `POST` JSON `{event, title, message, priority, url, time, source}` (n8n, par exemple).
+Puis `patchwarden notify-test` et `systemctl restart patchwarden`. La prochaine détection
+automatique est affichée en haut de l'inventaire.
+
+La première détection planifiée signale tous les correctifs déjà en attente (ils sont
+nouveaux pour PatchWarden) ; les suivantes ne signalent que ce qui est apparu depuis.
+
 ### Mettre à jour PatchWarden
 
 Remplacez `/usr/local/bin/patchwarden`, puis `systemctl restart patchwarden`. Les sessions
@@ -288,7 +327,9 @@ make build
 | `internal/detect` | Lecture de la sortie de détection, dernier résultat par invité |
 | `internal/cs` | Analyse des scripts community-scripts (applis suivies, exigences, questions) |
 | `internal/upstream` | Dernières versions sur GitHub, Codeberg, GitLab (avec cache) |
-| `internal/engine` | Assemble le tout : construit le travail de chaque tâche |
+| `internal/engine` | Assemble le tout : détection, plans et mises à jour, rapport planifié, notifications de fin |
+| `internal/notify` | Notifications ntfy, Gotify, webhook |
+| `internal/schedule` | Déclenchement quotidien aux heures configurées |
 | `internal/web` | Interface : sessions, CSRF, pages, journal en direct (SSE), gabarits embarqués |
 | `deploy/patchwarden-wrapper` | Wrapper à installer sur les nœuds |
 | `tools/sonde.sh` | Sonde de diagnostic à lancer sur un nœud (lecture seule) |

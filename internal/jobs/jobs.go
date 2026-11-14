@@ -115,6 +115,10 @@ type entry struct {
 
 // Manager orchestre les tâches.
 type Manager struct {
+	// OnFinish, s'il est défini avant la première tâche, est appelé à la fin
+	// de chaque tâche (notifications). Il ne doit pas bloquer.
+	OnFinish func(Job)
+
 	dir       string
 	retention int
 	sem       chan struct{}
@@ -299,6 +303,9 @@ func (m *Manager) finish(e *entry, st Status, summary, errText string) {
 		m.log.Error("écriture de la tâche", "id", j.ID, "erreur", err)
 	}
 	m.log.Info("tâche terminée", "id", j.ID, "statut", j.Status, "erreur", errText)
+	if m.OnFinish != nil {
+		m.OnFinish(j)
+	}
 	m.prune()
 }
 

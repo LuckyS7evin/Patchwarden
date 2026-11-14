@@ -30,7 +30,9 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/notify"
 	"github.com/LuckyS7evin/patchwarden/internal/proxmox"
+	"github.com/LuckyS7evin/patchwarden/internal/schedule"
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
 	"github.com/LuckyS7evin/patchwarden/internal/web"
@@ -47,6 +49,8 @@ Usage :
   patchwarden [serve] [-config FICHIER]   lance l'interface web (par défaut)
   patchwarden check-config [-config FICHIER]
                                          valide la configuration et teste chaque point d'accès Proxmox
+  patchwarden notify-test [-config FICHIER]
+                                         envoie un message de test à chaque cible [[notify]]
   patchwarden hash-password              produit le hachage bcrypt à mettre dans auth.password_hash
   patchwarden ssh-keygen -key FICHIER -from IP
                                          crée la clé SSH dédiée et affiche la ligne authorized_keys des nœuds
@@ -71,6 +75,8 @@ func main() {
 		err = hashPassword()
 	case "ssh-keygen":
 		err = sshKeygen(args)
+	case "notify-test":
+		err = notifyTest(args)
 	case "version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -159,7 +165,10 @@ func serve(args []string) error {
 		Answers:    answers,
 		SelfGuest:  cfg.Policy.SelfGuest,
 		Hostname:   hostname,
+		Notify:     notify.New(cfg.Notify, nil, log),
+		PublicURL:  cfg.Server.PublicURL,
 	}
+	jm.OnFinish = eng.NotifyJob
 	if cfg.SSH.Enabled() {
 		ex, err := sshx.New(cfg.SSH)
 		if err != nil {
@@ -169,7 +178,11 @@ func serve(args []string) error {
 	} else {
 		log.Warn("aucune section [ssh.nodes] : PatchWarden reste en lecture seule (ni détection ni action)")
 	}
-	ui, err := web.New(cfg, inv, web.Deps{Engine: eng, Jobs: jm, Detections: store}, log, version)
+	sched := schedule.New(cfg.Schedule.DetectAt, func(ctx context.Context) {
+		snap, _ := inv.Current()
+		eng.ScheduledDetection(ctx, snap.Guests)
+	}, log)
+	ui, err := web.New(cfg, inv, web.Deps{Engine: eng, Jobs: jm, Detections: store, NextDetection: sched.Next}, log, version)
 	if err != nil {
 		return err
 	}
@@ -177,6 +190,13 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go inv.Run(ctx, cfg.Inventory.Refresh.Duration)
+	if sched.Enabled() {
+		if eng.Runner == nil {
+			log.Warn("détection planifiée ignorée : pas d'accès SSH ([ssh.nodes])")
+		} else {
+			go sched.Run(ctx)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Listen,
@@ -352,5 +372,37 @@ func hashPassword() error {
 		return err
 	}
 	fmt.Println(string(h))
+	return nil
+}
+
+func notifyTest(args []string) error {
+	path, err := configFlag("notify-test", args)
+	if err != nil {
+		return err
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	cfg, err := loadConfig(path, log)
+	if err != nil {
+		return err
+	}
+	hub := notify.New(cfg.Notify, nil, log)
+	if !hub.Enabled() {
+		return errors.New("aucune cible [[notify]] dans la configuration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	link := ""
+	if cfg.Server.PublicURL != "" {
+		link = cfg.Server.PublicURL
+	}
+	errs := hub.Send(ctx, notify.Message{Event: notify.EvTest, Priority: 3, URL: link,
+		Title: "PatchWarden : notification de test", Body: "Si vous lisez ce message, les notifications fonctionnent."})
+	for _, e := range errs {
+		fmt.Println("  ✘", e)
+	}
+	fmt.Printf("%d cible(s), %d en erreur : %s\n", len(hub.Targets()), len(errs), strings.Join(hub.Targets(), ", "))
+	if len(errs) > 0 {
+		return fmt.Errorf("%d cible(s) en erreur", len(errs))
+	}
 	return nil
 }

@@ -48,6 +48,24 @@ type Config struct {
 	Detection Detection  `toml:"detection"`
 	CS        CS         `toml:"community_scripts"`
 	Upstream  Upstream   `toml:"upstream"`
+	Schedule  Schedule   `toml:"schedule"`
+	Notify    []Notify   `toml:"notify"`
+}
+
+// Schedule règle la détection automatique (lecture seule).
+type Schedule struct {
+	// DetectAt : heures locales (« HH:MM ») de détection de tous les LXC démarrés.
+	DetectAt []string `toml:"detect_at"`
+}
+
+// Notify est une cible de notification.
+type Notify struct {
+	Type     string `toml:"type"` // ntfy, gotify, webhook
+	URL      string `toml:"url"`
+	Token    string `toml:"token"`
+	TokenEnv string `toml:"token_env"`
+	// Events : securite, applis, echec, succes (défaut : securite, applis, echec).
+	Events []string `toml:"events"`
 }
 
 // SSH règle l'accès aux nœuds (wrapper à commande forcée). Sans nœud déclaré,
@@ -104,6 +122,9 @@ type Upstream struct {
 type Server struct {
 	// Listen est l'adresse d'écoute, par exemple "0.0.0.0:8080".
 	Listen string `toml:"listen"`
+	// PublicURL : adresse de l'interface, pour les liens des notifications
+	// (ex. « http://192.168.0.19:8094 »). Facultatif.
+	PublicURL string `toml:"public_url"`
 	// CookieSecure ajoute l'attribut Secure au cookie de session. À activer
 	// dès que l'interface est servie en HTTPS (directement ou derrière un proxy).
 	CookieSecure bool `toml:"cookie_secure"`
@@ -269,6 +290,19 @@ func (c *Config) resolveSecrets(getenv func(string) string) error {
 			return fmt.Errorf("proxmox %q : la variable d'environnement %s est vide ou absente", ep.Name, ep.TokenSecretEnv)
 		}
 	}
+	for i := range c.Notify {
+		n := &c.Notify[i]
+		if n.TokenEnv == "" {
+			continue
+		}
+		if n.Token != "" {
+			return fmt.Errorf("notify n° %d : token et token_env sont exclusifs", i+1)
+		}
+		n.Token = getenv(n.TokenEnv)
+		if n.Token == "" {
+			return fmt.Errorf("notify n° %d : la variable d'environnement %s est vide ou absente", i+1, n.TokenEnv)
+		}
+	}
 	if c.Upstream.GitHubTokenEnv != "" {
 		if c.Upstream.GitHubToken != "" {
 			return errors.New("upstream : github_token et github_token_env sont exclusifs")
@@ -341,6 +375,38 @@ func (c *Config) Validate() error {
 	}
 	if c.Inventory.Timeout.Duration <= 0 {
 		add("inventory.timeout doit être positif")
+	}
+	for _, t := range c.Schedule.DetectAt {
+		if _, err := time.Parse("15:04", t); err != nil {
+			add("schedule.detect_at : heure « HH:MM » attendue, obtenu %q", t)
+		}
+	}
+	if c.Server.PublicURL != "" {
+		if u, err := url.Parse(c.Server.PublicURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("server.public_url : URL http(s) attendue, obtenu %q", c.Server.PublicURL)
+		}
+	}
+	for i, n := range c.Notify {
+		switch n.Type {
+		case "ntfy", "gotify", "webhook":
+		default:
+			add("notify n° %d : type attendu ntfy, gotify ou webhook, obtenu %q", i+1, n.Type)
+		}
+		if u, err := url.Parse(n.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("notify n° %d : url http(s) attendue, obtenu %q", i+1, n.URL)
+		} else if n.Type == "ntfy" && strings.Trim(u.Path, "/") == "" {
+			add("notify n° %d : l'url ntfy doit contenir le sujet (ex. https://ntfy.sh/mon-sujet)", i+1)
+		}
+		if n.Type == "gotify" && n.Token == "" {
+			add("notify n° %d : gotify exige token ou token_env (jeton d'application)", i+1)
+		}
+		for _, e := range n.Events {
+			switch e {
+			case "securite", "applis", "echec", "succes":
+			default:
+				add("notify n° %d : événement inconnu %q (securite, applis, echec, succes)", i+1, e)
+			}
+		}
 	}
 	if c.Policy.SelfGuest != "" && !selfRe.MatchString(c.Policy.SelfGuest) {
 		add("policy.self_guest : format « nœud/vmid » attendu (ex. loki/103), obtenu %q", c.Policy.SelfGuest)

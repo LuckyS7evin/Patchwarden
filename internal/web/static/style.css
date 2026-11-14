@@ -84,6 +84,12 @@ td.updates { min-width: 180px; }
 .logbar { display: flex; justify-content: space-between; align-items: baseline; }
 .log { background: #0d1117; color: #d6dde6; border-radius: 8px; padding: 12px; overflow: auto; max-height: 70vh; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
 .log .err { color: #f5a97f; }
+tr.subrow td { padding-top: 0; border-bottom: 1px solid var(--border); }
+tr:has(+ tr.subrow) td { border-bottom: none; }
+.pkglist { padding: 6px 0; }
+.spaced { margin-top: 16px; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.inline-form form { margin: 0; }
 .actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .action-box ul { margin: 8px 0 0; padding-left: 18px; }
 .btn-disabled { opacity: .55; cursor: not-allowed; }

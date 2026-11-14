@@ -5,6 +5,8 @@
 
 [server]
 listen = "0.0.0.0:8080"
+# Adresse de l'interface, pour les liens des notifications (facultatif).
+# public_url = "http://192.168.0.19:8094"
 # Mettre à true si l'interface est servie en HTTPS (directement ou via un reverse proxy).
 cookie_secure = false
 
@@ -92,3 +94,23 @@ website_url = "https://community-scripts.org"
 # sans lui, l'API GitHub limite à 60 requêtes par heure.
 # github_token_env = "PATCHWARDEN_GITHUB_TOKEN"
 cache_ttl = "6h"
+
+# Détection automatique (lecture seule) de tous les LXC démarrés, heures locales.
+# Rien n'est jamais mis à jour automatiquement.
+# [schedule]
+# detect_at = ["03:40"]
+
+# Notifications : une section par cible. Types : ntfy, gotify, webhook.
+# Événements : securite (nouveaux correctifs), applis (nouvelles versions),
+# echec (mise à jour ou détection planifiée en échec), succes (mise à jour réussie).
+# Défaut : securite, applis, echec. Test : patchwarden notify-test
+# [[notify]]
+# type = "ntfy"
+# url = "https://ntfy.sh/mon-sujet-secret"
+# token_env = "PATCHWARDEN_NTFY_TOKEN"
+# events = ["securite", "applis", "echec"]
+#
+# [[notify]]
+# type = "gotify"
+# url = "https://gotify.lan"
+# token_env = "PATCHWARDEN_GOTIFY_TOKEN"

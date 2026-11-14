@@ -157,6 +157,30 @@ Commande : `pct exec 103 -- env PHS_SILENT=1 TERM=dumb update </dev/null`
 | Vérification | Détection relancée en fin de mise à jour, dans la même tâche |
 | Snapshots | Reportés au jalon suivant (comme prévu) ; l'interface le rappelle sur la page de confirmation |
 
+## Feuille de route (validée le 14/11/2026, propositions 1 à 11 retenues, 12 écartée)
+
+| Jalon | Contenu |
+| :--- | :--- |
+| 4 ✅ | Détection planifiée (1), notifications (2), vue sécurité (3) |
+| 5 | Snapshots avant mise à jour (exigence initiale), retour arrière en un clic (5) |
+| 6 | Lots, regroupement par tags (6), redémarrages requis (8) |
+| 7 | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
+| 8 | Docker via l'API Portainer |
+| 9 | Vérification après mise à jour (4), fenêtres de maintenance (9), sécurité automatique (10, après les snapshots), métriques Prometheus (11) |
+
+Écartée pour l'instant : comptes multiples / OIDC (12).
+
+## Jalon 4 : planification, notifications, vue sécurité
+
+| Sujet | Décision |
+| :--- | :--- |
+| Planification | Heures locales fixes (`detect_at`), pas de syntaxe cron. Détection seule, jamais d'action automatique |
+| Rapport | Une détection planifiée produit au plus trois messages (sécurité, applis, échecs), seulement s'il y a du nouveau ; les détections manuelles ne notifient pas |
+| Nouveauté | Date de première apparition par paquet (nom + version) et par version d'appli, conservée d'une détection à l'autre ; c'est la date de détection par PatchWarden, pas la date de publication |
+| Fin de tâche | Mise à jour réelle réussie (`succes`, désactivé par défaut) ou échouée/interrompue (`echec`) ; jamais pour une simulation |
+| Cibles | ntfy (publication JSON, UTF-8 sûr), Gotify, webhook générique ; l'e-mail viendra si besoin |
+| Envoi | Asynchrone, échecs journalisés, jamais bloquants |
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).

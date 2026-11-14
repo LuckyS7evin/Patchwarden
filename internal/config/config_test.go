@@ -168,3 +168,51 @@ tyr = "192.168.0.43:2222"
 		t.Errorf("apt_refresh = false ignoré : %v", err)
 	}
 }
+
+func TestScheduleAndNotify(t *testing.T) {
+	t.Setenv("PW_NTFY", "jeton")
+	ok := valid + `
+[server]
+public_url = "http://192.168.0.19:8094"
+[schedule]
+detect_at = ["03:40", "14:05"]
+[[notify]]
+type = "ntfy"
+url = "https://ntfy.sh/patchwarden"
+token_env = "PW_NTFY"
+events = ["securite", "echec"]
+[[notify]]
+type = "webhook"
+url = "http://n8n.lan/webhook/pw"
+`
+	cfg, _, err := Load(write(t, ok, 0o600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Schedule.DetectAt) != 2 || cfg.Notify[0].Token != "jeton" || cfg.Notify[1].Type != "webhook" {
+		t.Errorf("lu : %+v %+v", cfg.Schedule, cfg.Notify)
+	}
+	bad := valid + `
+[schedule]
+detect_at = ["25:00"]
+[[notify]]
+type = "slack"
+url = "ftp://x"
+events = ["tout"]
+[[notify]]
+type = "ntfy"
+url = "https://ntfy.sh/"
+[[notify]]
+type = "gotify"
+url = "https://gotify.lan"
+`
+	_, _, err = Load(write(t, bad, 0o600))
+	if err == nil {
+		t.Fatal("erreurs attendues")
+	}
+	for _, want := range []string{"detect_at", "type attendu", "url http(s)", "événement inconnu", "contenir le sujet", "gotify exige"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("erreur %q absente : %v", want, err)
+		}
+	}
+}

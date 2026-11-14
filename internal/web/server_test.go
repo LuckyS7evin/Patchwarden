@@ -149,7 +149,8 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(jm.Close)
 	store, _ := detect.OpenStore(dir)
 	eng := &fakeEngine{jm: jm}
-	srv, err := New(cfg, inv, Deps{Engine: eng, Jobs: jm, Detections: store}, log, "test")
+	next := time.Date(2026, 11, 15, 3, 40, 0, 0, time.Local)
+	srv, err := New(cfg, inv, Deps{Engine: eng, Jobs: jm, Detections: store, NextDetection: func() time.Time { return next }}, log, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +226,7 @@ func TestLoginAndInventoryPage(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("inventaire : %d", resp.StatusCode)
 	}
-	for _, want := range []string{"termix", "community-scripts", "confirmation renforcée", "tag « critique »", "il y a 5 min", "odin : délai dépassé", "&lt;script&gt;", "(nom indisponible)", ">inconnu<", "pvestatd sur tyr"} {
+	for _, want := range []string{"termix", "community-scripts", "confirmation renforcée", "tag « critique »", "il y a 5 min", "odin : délai dépassé", "&lt;script&gt;", "(nom indisponible)", ">inconnu<", "pvestatd sur tyr", "Prochaine détection automatique : 15/11 à 03:40"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%q absent de la page", want)
 		}
@@ -519,5 +520,28 @@ func TestCriticalConfirmation(t *testing.T) {
 	resp, _ = h.do("POST", "/invites/tyr/403/action/securite", url.Values{"csrf": {tok}, "simulation": {"0"}, "confirme": {"1"}, "nom": {"omv"}}, nil)
 	if !strings.HasPrefix(resp.Header.Get("Location"), "/taches/") {
 		t.Errorf("bon nom refusé : %s", resp.Header.Get("Location"))
+	}
+}
+
+func TestSecurityPage(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	old := h.now.Add(-72 * time.Hour)
+	_ = h.store.Put("loki/104", detect.Result{At: h.now.Add(-time.Hour), Apt: detect.Apt{Present: true, Security: 2, SecurityStrict: 1, Packages: []detect.Package{
+		{Name: "libssl3t64", Old: "1", New: "2", Security: true, Since: old},
+		{Name: "curl", Old: "1", New: "2", Security: true, Since: h.now.Add(-time.Hour)},
+		{Name: "bash", Old: "1", New: "2"},
+	}}})
+	_, body := h.do("GET", "/securite", nil, nil)
+	for _, want := range []string{"2</span> correctifs de sécurité", "1</span> invité(s) concerné(s)", "termix", "il y a 3 jours", "libssl3t64", "curl", "le reste avec", `href="/invites/loki/104/action/securite"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page sécurité sans %q", want)
+		}
+	}
+	if strings.Contains(body, ">bash<") {
+		t.Error("un paquet non lié à la sécurité ne doit pas apparaître")
+	}
+	if !strings.Contains(body, "VM non couvertes") {
+		t.Error("les VM doivent être signalées comme non couvertes")
 	}
 }

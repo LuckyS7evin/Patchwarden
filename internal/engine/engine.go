@@ -15,6 +15,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/notify"
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
 )
@@ -35,6 +36,9 @@ type Engine struct {
 	// SelfGuest (« nœud/vmid ») ou, à défaut, Hostname : invité hébergeant PatchWarden.
 	SelfGuest string
 	Hostname  string
+	// Notify (facultatif) et PublicURL : notifications et liens.
+	Notify    *notify.Hub
+	PublicURL string
 }
 
 // Erreurs de refus, affichées telles quelles dans l'interface.

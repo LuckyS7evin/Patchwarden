@@ -115,3 +115,30 @@ func TestStore(t *testing.T) {
 		t.Errorf("relu : %+v", got)
 	}
 }
+
+func TestSinceIsCarried(t *testing.T) {
+	s, _ := OpenStore(t.TempDir())
+	t1 := time.Date(2026, 11, 10, 3, 40, 0, 0, time.UTC)
+	t2 := t1.Add(24 * time.Hour)
+	first := Result{At: t1, Apt: Apt{Packages: []Package{
+		{Name: "libssl3t64", New: "3.5.7-2", Security: true},
+		{Name: "bash", New: "5.2-10"},
+	}}, Apps: []App{{Name: "termix", Installed: "1", InstalledKnown: true, Latest: "2"}}}
+	_ = s.Put("loki/104", first)
+	second := Result{At: t2, Apt: Apt{Packages: []Package{
+		{Name: "libssl3t64", New: "3.5.7-2", Security: true}, // toujours en attente
+		{Name: "curl", New: "8.14-7", Security: true},        // nouveau
+	}}, Apps: []App{{Name: "termix", Installed: "1", InstalledKnown: true, Latest: "3"}}} // nouvelle version
+	_ = s.Put("loki/104", second)
+	got, _ := s.Get("loki/104")
+	if !got.Apt.Packages[0].Since.Equal(t1) || !got.Apt.Packages[1].Since.Equal(t2) {
+		t.Errorf("dates des paquets : %+v", got.Apt.Packages)
+	}
+	if !got.OldestSecurity().Equal(t1) {
+		t.Errorf("plus ancien correctif : %v", got.OldestSecurity())
+	}
+	sec, apps := got.NewSince(t2)
+	if len(sec) != 1 || sec[0].Name != "curl" || len(apps) != 1 || apps[0].Latest != "3" {
+		t.Errorf("nouveautés : %+v %+v", sec, apps)
+	}
+}

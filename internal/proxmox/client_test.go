@@ -77,3 +77,58 @@ func TestHTTPErrorsAreExplained(t *testing.T) {
 		}
 	}
 }
+
+// Cas de TYR : le cluster ne connaît plus l'état des invités du nœud
+// (« unknown », sans nom) ; la liste est relue sur le nœud lui-même.
+func TestUnknownNodeStatusIsCompleted(t *testing.T) {
+	srv, fp := server(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api2/json/cluster/resources":
+			_, _ = w.Write([]byte(`{"data":[
+			 {"id":"lxc/104","type":"lxc","vmid":104,"node":"loki","name":"termix","status":"running"},
+			 {"id":"lxc/114","type":"lxc","vmid":114,"node":"tyr","status":"unknown","tags":"community-script;media"},
+			 {"id":"qemu/403","type":"qemu","vmid":403,"node":"tyr","status":"unknown","tags":"critique"},
+			 {"id":"lxc/116","type":"lxc","vmid":116,"node":"tyr","status":"unknown"}]}`))
+		case "/api2/json/nodes/tyr/lxc":
+			_, _ = w.Write([]byte(`{"data":[{"vmid":"114","name":"jellyfin","status":"running","tags":"community-script;media"},{"vmid":"116","name":"ai-chat","status":"stopped"}]}`))
+		case "/api2/json/nodes/tyr/qemu":
+			_, _ = w.Write([]byte(`{"data":[{"vmid":403,"name":"OMV6","status":"running","template":0}]}`))
+		default:
+			t.Errorf("requête inattendue : %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	c, _ := New(endpoint(srv.URL, fp), 5*time.Second)
+	g, err := c.Guests(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[int]Resource{}
+	for _, r := range g {
+		by[r.VMID] = r
+	}
+	if by[114].Name != "jellyfin" || by[114].Status != "running" || by[114].Tags != "community-script;media" {
+		t.Errorf("114 : %+v", by[114])
+	}
+	if by[403].Name != "OMV6" || by[403].Status != "running" || by[403].Tags != "critique" {
+		t.Errorf("403 : %+v", by[403])
+	}
+	if by[116].Status != "stopped" || by[104].Name != "termix" {
+		t.Errorf("116/104 : %+v %+v", by[116], by[104])
+	}
+}
+
+func TestUnknownNodeStatusNodeDown(t *testing.T) {
+	srv, fp := server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/cluster/resources" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"lxc/114","type":"lxc","vmid":114,"node":"tyr","status":"unknown"}]}`))
+			return
+		}
+		http.Error(w, "nœud injoignable", http.StatusInternalServerError)
+	})
+	c, _ := New(endpoint(srv.URL, fp), 5*time.Second)
+	g, err := c.Guests(context.Background())
+	if err != nil || len(g) != 1 || g[0].Status != "unknown" {
+		t.Errorf("les données partielles doivent être gardées : %v %+v", err, g)
+	}
+}

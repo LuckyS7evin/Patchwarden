@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,13 +98,88 @@ func (c *Client) Name() string { return c.name }
 
 // Guests renvoie tous les LXC et VM visibles depuis ce point d'accès : tout le
 // cluster si le nœud en fait partie, sinon ce seul nœud.
+//
+// Quand un nœud ne publie plus l'état de ses invités au cluster (pvestatd
+// arrêté ou bloqué), /cluster/resources les renvoie avec l'état « unknown » et
+// sans nom. Leur liste est alors relue directement sur le nœud
+// (/nodes/<nœud>/lxc et /qemu), qui reste généralement disponible.
 func (c *Client) Guests(ctx context.Context) ([]Resource, error) {
 	var out []Resource
 	if err := c.get(ctx, "/cluster/resources?type=vm", &out); err != nil {
 		return nil, err
 	}
+	incomplete := map[string]bool{}
+	for _, r := range out {
+		if (r.Type == "lxc" || r.Type == "qemu") && (r.Status == "unknown" || r.Status == "" || r.Name == "") {
+			incomplete[r.Node] = true
+		}
+	}
+	for node := range incomplete {
+		local, err := c.nodeGuests(ctx, node)
+		if err != nil {
+			continue // on garde les données partielles du cluster
+		}
+		for i := range out {
+			r := &out[i]
+			if r.Node != node {
+				continue
+			}
+			if l, ok := local[r.Type+"/"+strconv.Itoa(r.VMID)]; ok {
+				if r.Name == "" {
+					r.Name = l.Name
+				}
+				if r.Status == "unknown" || r.Status == "" {
+					r.Status = l.Status
+				}
+				if r.Tags == "" {
+					r.Tags = l.Tags
+				}
+				if r.Lock == "" {
+					r.Lock = l.Lock
+				}
+				if l.Template != 0 {
+					r.Template = 1
+				}
+			}
+		}
+	}
 	return out, nil
 }
+
+// nodeGuest est une entrée de /nodes/<nœud>/lxc ou /qemu. Proxmox renvoie le
+// VMID tantôt en nombre, tantôt en chaîne : json.Number accepte les deux.
+type nodeGuest struct {
+	VMID     json.Number `json:"vmid"`
+	Name     string      `json:"name"`
+	Status   string      `json:"status"`
+	Tags     string      `json:"tags"`
+	Lock     string      `json:"lock"`
+	Template json.Number `json:"template"`
+}
+
+func (c *Client) nodeGuests(ctx context.Context, node string) (map[string]Resource, error) {
+	if !nodeNameRe.MatchString(node) {
+		return nil, fmt.Errorf("nom de nœud invalide : %q", node)
+	}
+	out := map[string]Resource{}
+	for _, typ := range []string{"lxc", "qemu"} {
+		var list []nodeGuest
+		if err := c.get(ctx, "/nodes/"+node+"/"+typ, &list); err != nil {
+			return nil, err
+		}
+		for _, g := range list {
+			id, err := strconv.Atoi(g.VMID.String())
+			if err != nil {
+				continue
+			}
+			tpl, _ := strconv.Atoi(g.Template.String())
+			out[typ+"/"+strconv.Itoa(id)] = Resource{Type: typ, VMID: id, Node: node, Name: g.Name, Status: g.Status, Tags: g.Tags, Lock: g.Lock, Template: tpl}
+		}
+	}
+	return out, nil
+}
+
+var nodeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$`)
 
 func (c *Client) get(ctx context.Context, path string, dst any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)

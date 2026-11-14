@@ -71,9 +71,9 @@
     {{range .Rows}}
       <tr{{if .Stale}} class="stale"{{end}}>
         <td class="num">{{.VMID}}</td>
-        <td><a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></td>
+        <td><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a></td>
         <td>{{.TypeLabel}}</td>
-        <td><span class="status status-{{.Status}}">{{if eq .Status "running"}}démarré{{else if eq .Status "stopped"}}arrêté{{else}}{{.Status}}{{end}}</span></td>
+        <td><span class="status status-{{.Status}}"{{if eq (statusLabel .Status) "inconnu"}} title="Le nœud ne publie pas l'état de ses invités au cluster (vérifiez le service pvestatd sur {{.Node}})"{{end}}>{{statusLabel .Status}}</span></td>
         <td class="updates">
           {{if .Active}}<a class="badge badge-run" href="/taches/{{.Active.ID}}">{{.Active.Kind}} {{.Active.Status}}…</a>
           {{else if .Det}}

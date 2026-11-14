@@ -96,6 +96,7 @@ func newHarness(t *testing.T) *harness {
 			{Node: "loki", Type: "lxc", VMID: 104, Name: "termix", Status: "running", Tags: []string{"community-script"}, CommunityScript: true},
 			{Node: "loki", Type: "qemu", VMID: 203, Name: "PBS", Status: "running", Tags: []string{"critique"}, Critical: true, CriticalReason: "tag « critique »"},
 			{Node: "tyr", Type: "qemu", VMID: 999, Name: "<script>alert(1)</script>", Status: "stopped"},
+			{Node: "tyr", Type: "lxc", VMID: 114, Status: "unknown"},
 		},
 	}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -183,7 +184,7 @@ func TestLoginAndInventoryPage(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("inventaire : %d", resp.StatusCode)
 	}
-	for _, want := range []string{"termix", "community-scripts", "confirmation renforcée", "tag « critique »", "il y a 5 min", "odin : délai dépassé", "&lt;script&gt;"} {
+	for _, want := range []string{"termix", "community-scripts", "confirmation renforcée", "tag « critique »", "il y a 5 min", "odin : délai dépassé", "&lt;script&gt;", "(nom indisponible)", ">inconnu<", "pvestatd sur tyr"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%q absent de la page", want)
 		}
@@ -331,7 +332,7 @@ func TestDetectAll(t *testing.T) {
 	h := newHarness(t)
 	h.login()
 	resp, _ := h.do("POST", "/inventaire/detecter", url.Values{"csrf": {h.csrf()}}, nil)
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/taches?lancees=1&ignores=2" {
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/taches?lancees=1&ignores=3" {
 		t.Errorf("détection globale : %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }

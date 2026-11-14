@@ -80,6 +80,20 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		"age":   func(t time.Time) string { return humanAge(s.now().Sub(t)) },
 		"clock": func(t time.Time) string { return t.Local().Format("15:04:05") },
 		"date":  func(t time.Time) string { return t.Local().Format("02/01/2006 15:04") },
+		"statusLabel": func(st string) string {
+			switch st {
+			case "running":
+				return "démarré"
+			case "stopped":
+				return "arrêté"
+			case "paused":
+				return "en pause"
+			case "", "unknown":
+				return "inconnu"
+			default:
+				return st
+			}
+		},
 		"statusClass": func(st jobs.Status) string {
 			switch st {
 			case jobs.Success:

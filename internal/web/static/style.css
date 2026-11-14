@@ -49,6 +49,7 @@ tr.stale td { opacity: .6; }
 .status { font-size: .85rem; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
 .status-running { background: var(--ok-bg); color: var(--ok); }
 .status-stopped { background: var(--tag-bg); color: var(--muted); }
+.status-unknown, .status- { background: var(--warn-bg); color: var(--warn); }
 .tag, .badge { display: inline-block; font-size: .78rem; padding: 1px 7px; margin: 1px 3px 1px 0; border-radius: 10px; background: var(--tag-bg); color: var(--muted); white-space: nowrap; }
 .badge-cs { background: var(--cs-bg); color: var(--accent); }
 .badge-crit { background: var(--crit-bg); color: var(--crit); }

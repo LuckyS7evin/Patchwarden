@@ -39,6 +39,7 @@ var (
 	ErrNodeNoSSH   = errors.New("nœud absent de [ssh.nodes]")
 	ErrNotLXC      = errors.New("la détection des VM arrive dans un prochain jalon")
 	ErrStopped     = errors.New("invité arrêté : ignoré (aucune action sur les invités arrêtés)")
+	ErrUnknown     = errors.New("état inconnu : le nœud ne publie pas l'état de ses invités (vérifiez pvestatd sur le nœud)")
 	ErrTemplate    = errors.New("modèle : aucune action")
 	ErrStaleNode   = errors.New("nœud injoignable lors du dernier inventaire")
 	exitRefused    = 2
@@ -54,6 +55,8 @@ func (e *Engine) CanDetect(g inventory.Guest) error {
 		return ErrTemplate
 	case g.Type != "lxc":
 		return ErrNotLXC
+	case g.Status == "unknown" || g.Status == "":
+		return ErrUnknown
 	case g.Status != "running":
 		return ErrStopped
 	case g.Stale:

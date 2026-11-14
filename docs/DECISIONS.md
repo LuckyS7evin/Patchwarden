@@ -131,6 +131,16 @@ Commande : `pct exec 103 -- env PHS_SILENT=1 TERM=dumb update </dev/null`
 | Entrée `update` | ✅ l'ancien format est remplacé par le nouveau (`SCRIPT_SLUG`, `UPDATE_SCRIPT_NAME`, `misc/update.sh`) | Les prochaines exécutions passeront par `community-scripts.org/api/update-info` |
 | `_CS_RUN_LOG` | ❌ ignoré : `ui/build-ui.func` définit `BUILD_LOG=/tmp/create-lxc-<session>.log`, prioritaire, même pendant une mise à jour | ✅ Le journal `/tmp/create-lxc-<session>.log` contient tout le détail (sortie apt, lignes `[OK]`/`[INFO]` horodatées) et reste après la fin. PatchWarden repère le nouveau fichier créé après le lancement, le suit jusqu'à la fin du processus, l'archive dans son historique puis le supprime de l'invité. Les `\r` (barres de progression d'apt) sont traités à l'affichage |
 
+## Première installation réelle (14/11/2026, PatchWarden dans le CT 103 sur LOKI)
+
+| Constat | Correction |
+| :--- | :--- |
+| `config.example.toml` activait `[ssh.nodes]` : `check-config` exigeait la clé SSH dès l'étape 4 | Section commentée jusqu'à l'étape 6 ; messages qui expliquent quoi faire |
+| Le client SSH Go demandait d'abord la clé d'hôte ECDSA ; `known_hosts` ne contenait que l'ed25519 → « clé différente » à tort | Les algorithmes demandés sont ceux des clés connues pour l'hôte (test avec un serveur à trois clés) |
+| TYR : `sshd_config` force `HostKey /etc/ssh/ssh_host_rsa_key`, seule la clé RSA est proposée | Clé RSA enregistrée ; PatchWarden la gère. Changer `sshd_config` reste une décision du propriétaire |
+| TYR : `/cluster/resources` renvoie ses invités en `unknown`, sans nom (le nœud ne publie plus leur état, pvestatd probable) | Relecture de `/nodes/<nœud>/lxc` et `/qemu` pour les invités incomplets ; état « inconnu » expliqué ; détection refusée avec la cause |
+| Détection réelle : Dev à jour (75 paquets appliqués au test H5) ; Termix 120 paquets dont 65 de sécurité (65 en mode strict), guacd 1.6.0 à jour, termix `release-2.6.1-tag` → `v26.11.1`, question nginx et 4 CPU / 4 Go exigés repérés ; API GitHub joignable depuis le LAN | — |
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).

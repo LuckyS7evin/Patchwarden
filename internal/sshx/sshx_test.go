@@ -175,7 +175,7 @@ func TestKnownHostsWithSeveralHostKeys(t *testing.T) {
 	cfg := config.SSH{User: "root", KeyFile: keyFile, KnownHosts: kh, Nodes: map[string]string{"loki": srv.Addr}}
 	cfg.ConnectTimeout.Duration = 5 * time.Second
 
-	for name, key := range map[string]ssh.PublicKey{"ed25519": srv.HostKey, "ecdsa": srv.ExtraHostKey} {
+	for name, key := range map[string]ssh.PublicKey{"ed25519": srv.HostKey, "ecdsa": srv.ExtraHostKey, "rsa": srv.RSAHostKey} {
 		_ = os.WriteFile(kh, []byte(knownhosts.Line([]string{srv.Addr}, key)+"\n"), 0o600)
 		e, err := New(cfg)
 		if err != nil {

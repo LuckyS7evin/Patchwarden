@@ -36,11 +36,17 @@ exec)
 	script="$(cat | sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g")"
 	shift 2  # « sh -s »
 	[ "$1" = "--" ] && shift
-	exec sh -c "$script" pct-exec "$@" ;;
+	# Comme le vrai pct : le script arrive sur l'entrée standard du shell.
+	# bash lit un tuyau ligne par ligne (dash par blocs) : une commande qui lit
+	# l'entrée standard sans redirection consommerait la suite du script.
+	printf '%s\n' "$script" | exec bash -s -- "$@" ;;
 esac
 `
 
 const fakeApt = `#!/bin/bash
+# Comme dpkg ou apt-listchanges qui posent une question : lit l'entrée standard.
+# Si le wrapper ne la redirige pas, la suite du script serait consommée.
+cat >/dev/null
 echo "[apt-get $*]"
 case "$1" in update) exit 0 ;; esac
 case "$*" in *autoclean*) exit 0 ;; esac

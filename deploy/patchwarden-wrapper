@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 2) :
+# Verbes (version 3) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -31,7 +31,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=2
+WRAPPER_VERSION=3
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -76,6 +76,10 @@ check_ct() {
 	fi
 }
 
+# Règle pour tous les scripts d'invité : ils sont lus par « sh -s » sur l'entrée
+# standard ; toute commande qui pourrait lire l'entrée standard (apt, dpkg,
+# apt-listchanges, docker…) doit la recevoir de /dev/null, sinon elle
+# consommerait la suite du script.
 # ------------------------------------------------------------------------------
 # Fonction commune aux scripts d'invité : crée dans $1 une liste de sources apt
 # restreinte aux dépôts *-security (formats .list et deb822 .sources).
@@ -148,7 +152,7 @@ fi
 if has apt-get; then
 	kv apt.present 1
 	if [ "$REFRESH" = 1 ]; then
-		apt-get update -q >/tmp/.pw-apt-update.log 2>&1
+		apt-get update -q </dev/null >/tmp/.pw-apt-update.log 2>&1
 		rc=$?
 		kv apt.refresh_rc "$rc"
 		if [ "$rc" != 0 ]; then
@@ -161,7 +165,7 @@ if has apt-get; then
 
 	# Une ligne par paquet : nom, version installée (- si nouveau), nouvelle version, 1 si sécurité.
 	# Même commande que la mise à jour réelle (lxc-apt) : jamais de suppression.
-	apt-get -s -o Debug::NoLocking=1 --with-new-pkgs upgrade 2>/dev/null | awk '
+	apt-get -s -o Debug::NoLocking=1 --with-new-pkgs upgrade </dev/null 2>/dev/null | awk '
 		/^Inst / {
 			name = $2; old = "-"
 			if ($3 ~ /^\[/) { old = $3; gsub(/\[|\]/, "", old) }
@@ -173,16 +177,16 @@ if has apt-get; then
 			print "apt.pkg=" name " " old " " a[1] " " sec
 		}
 		END { print "apt.total=" n + 0; print "apt.security=" s + 0 }'
-	kv apt.upgrade_simple "$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst ')"
+	kv apt.upgrade_simple "$(apt-get -s -o Debug::NoLocking=1 upgrade </dev/null 2>/dev/null | grep -c '^Inst ')"
 	# Paquets que seul un dist-upgrade installerait (il peut supprimer des paquets) : non appliqués.
-	kv apt.dist_total "$(apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | grep -c '^Inst ')"
+	kv apt.dist_total "$(apt-get -s -o Debug::NoLocking=1 dist-upgrade </dev/null 2>/dev/null | grep -c '^Inst ')"
 
 	# Simulation « sécurité seule » stricte : uniquement les dépôts *-security.
 	tmp="$(mktemp -d /tmp/.pw-detect.XXXXXX)"
 	if pw_security_sources "$tmp"; then
 		kv apt.security_repo 1
 		apt-get -s -o Debug::NoLocking=1 -o Dir::Etc::SourceList="$tmp/sources.list" \
-			-o Dir::Etc::SourceParts="$tmp/parts" --with-new-pkgs upgrade 2>/dev/null |
+			-o Dir::Etc::SourceParts="$tmp/parts" --with-new-pkgs upgrade </dev/null 2>/dev/null |
 			awk '/^Inst / { n++; print "apt.strict_pkg=" $2 } END { print "apt.security_strict=" n + 0 }'
 	else
 		kv apt.security_repo 0
@@ -192,9 +196,9 @@ else
 	kv apt.present 0
 fi
 
-if has docker && docker info >/dev/null 2>&1; then
+if has docker && docker info </dev/null >/dev/null 2>&1; then
 	kv docker.present 1
-	kv docker.containers "$(docker ps -aq 2>/dev/null | wc -l)"
+	kv docker.containers "$(docker ps -aq </dev/null 2>/dev/null | wc -l)"
 else
 	kv docker.present 0
 fi
@@ -220,14 +224,14 @@ VERSIONS_EOF
 # ------------------------------------------------------------------------------
 read -r -d '' APTRUN <<'APTRUN_EOF'
 MODE="$1"; DRY="$2"
-export LC_ALL=C DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
+export LC_ALL=C DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 APT_LISTCHANGES_FRONTEND=none
 OPTS="-o APT::Color=0 -o Dpkg::Use-Pty=0 -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
 if [ "$DRY" = 1 ]; then
 	echo "PW: simulation (apt-get -s) : rien ne sera modifié ; index apt de la dernière détection"
 	OPTS="$OPTS -s -o Debug::NoLocking=1"
 else
 	echo "PW: apt-get update"
-	apt-get update -o APT::Color=0 -o DPkg::Lock::Timeout=300 || echo "PW-AVERTISSEMENT: apt-get update a signalé des erreurs, la mise à jour continue avec l'index disponible"
+	apt-get update -o APT::Color=0 -o DPkg::Lock::Timeout=300 </dev/null || echo "PW-AVERTISSEMENT: apt-get update a signalé des erreurs, la mise à jour continue avec l'index disponible"
 fi
 tmp=""
 if [ "$MODE" = security ]; then
@@ -243,11 +247,11 @@ if [ "$MODE" = security ]; then
 fi
 echo "PW: apt-get --with-new-pkgs upgrade"
 # shellcheck disable=SC2086
-apt-get $OPTS -y --with-new-pkgs upgrade
+apt-get $OPTS -y --with-new-pkgs upgrade </dev/null
 rc=$?
 [ -n "$tmp" ] && rm -rf "$tmp"
 if [ "$DRY" != 1 ] && [ "$rc" = 0 ]; then
-	apt-get -o APT::Color=0 -y autoclean >/dev/null 2>&1
+	apt-get -o APT::Color=0 -y autoclean </dev/null >/dev/null 2>&1
 fi
 if [ -e /var/run/reboot-required ]; then echo "pw.reboot_required=1"; fi
 echo "pw.apt_rc=$rc"

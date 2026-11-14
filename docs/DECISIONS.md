@@ -157,6 +157,24 @@ Commande : `pct exec 103 -- env PHS_SILENT=1 TERM=dumb update </dev/null`
 | Vérification | Détection relancée en fin de mise à jour, dans la même tâche |
 | Snapshots | Reportés au jalon suivant (comme prévu) ; l'interface le rappelle sur la page de confirmation |
 
+## Première mise à jour réelle (15/11/2026, « Sécurité uniquement » sur Termix)
+
+65 paquets installés depuis `trixie-security` en 30 s, code 0 ; la détection de fin trouve
+0 correctif de sécurité restant (55 paquets du dépôt principal en attente, attendu). nginx
+a été redémarré par son paquet.
+
+Constat : `apt-listchanges` est présent dans l'invité. Les scripts d'invité étant lus par
+`sh -s` sur l'entrée standard, une commande qui lit l'entrée standard (question de
+`apt-listchanges` ou de `dpkg`) consommerait la suite du script. Wrapper v3 : entrée
+standard de toutes les commandes d'invité redirigée depuis `/dev/null`,
+`APT_LISTCHANGES_FRONTEND=none`. Test de non-régression : le faux `pct` exécute le script
+avec `bash -s` depuis un tuyau (lecture ligne par ligne) et le faux `apt-get` lit
+l'entrée standard ; sans la correction, 7 tests échouent.
+
+À prévoir (jalon 6, redémarrages) : des services encore liés aux anciennes bibliothèques
+(libssl, par exemple) tant qu'ils ne sont pas redémarrés ; à repérer via les fichiers
+`(deleted)` de `/proc/*/maps`.
+
 ## Feuille de route (validée le 14/11/2026, propositions 1 à 11 retenues, 12 écartée)
 
 | Jalon | Contenu |

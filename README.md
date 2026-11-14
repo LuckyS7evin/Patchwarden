@@ -176,6 +176,13 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub     # …à comparer, sur chaqu
 chmod 640 /etc/patchwarden/known_hosts && chgrp patchwarden /etc/patchwarden/known_hosts
 ```
 
+Chaque nœud doit apparaître dans la sortie de `ssh-keygen -lf /etc/patchwarden/known_hosts`
+(les lignes commençant par `#` ne sont que des commentaires). Un nœud absent n'a
+probablement pas de clé ed25519 : enregistrez le type qu'il possède
+(`ls /etc/ssh/ssh_host_*_key.pub` sur le nœud), par exemple
+`ssh-keyscan -t ecdsa <IP> 2>/dev/null | grep -v '^#' >> /etc/patchwarden/known_hosts`.
+PatchWarden négocie le type de clé enregistré.
+
 Décommentez ensuite la section `[ssh.nodes]` de `config.toml` (adresses des nœuds), puis vérifiez :
 
 ```bash

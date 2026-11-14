@@ -130,11 +130,24 @@ Sans cette étape, PatchWarden reste en lecture seule. La clé SSH dédiée ne p
 **qu'une seule commande** sur les nœuds, le wrapper [`deploy/patchwarden-wrapper`](deploy/patchwarden-wrapper),
 et seulement depuis l'IP de PatchWarden.
 
-**Sur chaque nœud** (LOKI, TYR, ODIN), en root :
+**Sur chaque nœud** (LOKI, TYR, ODIN), en root : copier le wrapper depuis le dépôt, puis
+l'installer. Le plus simple est de passer par le nœud qui héberge le LXC PatchWarden : `pct pull`
+récupère le fichier dans le conteneur sans réseau, puis le cluster le recopie sur les autres
+nœuds (root s'y connecte déjà par clé). Exemple avec PatchWarden dans le CT 103 sur LOKI :
 
 ```bash
-install -m 755 patchwarden-wrapper /usr/local/sbin/patchwarden-wrapper
+# Sur LOKI
+pct pull 103 /root/Patchwarden/deploy/patchwarden-wrapper /tmp/patchwarden-wrapper
+install -m 755 /tmp/patchwarden-wrapper /usr/local/sbin/patchwarden-wrapper
+for n in 192.168.0.43 192.168.0.49; do            # TYR, ODIN
+  scp /tmp/patchwarden-wrapper root@$n:/tmp/ &&
+  ssh root@$n install -m 755 /tmp/patchwarden-wrapper /usr/local/sbin/patchwarden-wrapper
+done
+# Vérification : la même empreinte sur les trois nœuds
+for n in 192.168.0.141 192.168.0.43 192.168.0.49; do ssh root@$n sha256sum /usr/local/sbin/patchwarden-wrapper; done
 ```
+
+Hors cluster, copiez le fichier sur chaque nœud (`scp`, ou copier-coller depuis GitHub en *Raw*).
 
 **Dans le LXC PatchWarden** :
 

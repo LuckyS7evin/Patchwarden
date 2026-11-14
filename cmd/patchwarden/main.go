@@ -46,7 +46,8 @@ const defaultConfig = "/etc/patchwarden/config.toml"
 const usage = `PatchWarden %s
 
 Usage :
-  patchwarden [serve] [-config FICHIER]   lance l'interface web (par défaut)
+  patchwarden [serve] [-config FICHIER] [-env FICHIER]
+                                         lance l'interface web (par défaut)
   patchwarden check-config [-config FICHIER]
                                          valide la configuration et teste chaque point d'accès Proxmox
   patchwarden notify-test [-config FICHIER]
@@ -57,6 +58,8 @@ Usage :
   patchwarden version
 
 Fichier de configuration par défaut : %s
+Les secrets (variables *_env de la configuration) sont lus dans l'environnement,
+puis dans /etc/patchwarden/patchwarden.env (option -env pour un autre fichier).
 `
 
 func main() {
@@ -91,11 +94,32 @@ func main() {
 	}
 }
 
+const defaultEnvFile = "/etc/patchwarden/patchwarden.env"
+
+// configFlag lit -config et -env, puis charge le fichier d'environnement (les
+// secrets désignés par *_env dans la configuration), comme le fait systemd :
+// check-config et notify-test fonctionnent ainsi sans « source » préalable.
 func configFlag(name string, args []string) (string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	path := fs.String("config", defaultConfig, "fichier de configuration")
+	env := fs.String("env", defaultEnvFile, "fichier d'environnement (secrets) ; vide pour ne rien charger")
 	if err := fs.Parse(args); err != nil {
 		return "", err
+	}
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "env" {
+			explicit = true
+		}
+	})
+	if *env != "" {
+		warn, err := config.LoadEnvFile(*env, !explicit)
+		if err != nil {
+			return "", err
+		}
+		if warn != "" {
+			fmt.Fprintln(os.Stderr, "Avertissement :", warn)
+		}
 	}
 	return *path, nil
 }

@@ -125,7 +125,6 @@ certificat est régénéré (`pvecm updatecerts`, renouvellement ACME), mettez l
 patchwarden hash-password        # mot de passe de l'interface (12 caractères minimum)
 nano /etc/patchwarden/config.toml   # username, password_hash, [[proxmox]] url / fingerprint
 nano /etc/patchwarden/patchwarden.env
-set -a; . /etc/patchwarden/patchwarden.env; set +a
 patchwarden check-config         # valide le fichier et interroge chaque point d'accès
                                  # (laissez [ssh.nodes] commenté jusqu'à l'étape 6)
 ```

@@ -101,7 +101,7 @@
       <td>{{.Name}} <span class="muted small">{{.Repo}}</span></td>
       <td><code>{{if .Installed}}{{.Installed}}{{else}}?{{end}}</code></td>
       <td><code>{{if .Latest}}{{.Latest}}{{else}}?{{end}}</code>{{if .LatestError}}<br><span class="muted small">{{.LatestError}}</span>{{end}}</td>
-      <td>{{if .UpdateAvailable}}<span class="badge badge-warn">mise à jour disponible</span>{{else if eq .Status "à jour"}}<span class="badge badge-ok">à jour</span>{{else}}<span class="badge">inconnue</span>{{end}}</td>
+      <td>{{if .MajorChange}}<span class="badge badge-crit" title="Le premier numéro de version change : lisez le changelog">version majeure</span> {{end}}{{if .UpdateAvailable}}<span class="badge badge-warn">mise à jour disponible</span>{{else if eq .Status "à jour"}}<span class="badge badge-ok">à jour</span>{{else}}<span class="badge">inconnue</span>{{end}}</td>
       <td>{{if .ChangelogURL}}<a href="{{.ChangelogURL}}" target="_blank" rel="noopener noreferrer">ouvrir</a>{{end}}</td>
     </tr>
     {{end}}
@@ -117,7 +117,7 @@
   <h2>Paquets apt</h2>
   <p>
     {{if .Apt.Total}}<strong>{{.Apt.Total}}</strong> mise(s) à jour, dont <strong>{{.Apt.Security}}</strong> de sécurité.
-    « Sécurité uniquement » installerait <strong>{{.Apt.SecurityStrict}}</strong> paquet(s).
+    « Sécurité uniquement » installerait <strong>{{.Apt.SecurityStrict}}</strong> paquet(s){{if .Apt.StrictNew}}, dont {{.Apt.StrictNew}} nouvelle(s) dépendance(s){{end}}.
     {{else}}Aucune mise à jour apt.{{end}}
     {{if ge .Apt.IndexAgeHours 0}}<span class="muted small">Index apt rafraîchi il y a {{.Apt.IndexAgeHours}} h.</span>{{end}}
   </p>

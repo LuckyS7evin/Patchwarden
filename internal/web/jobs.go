@@ -102,7 +102,7 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request, se *session) 
 				d.OtherPkgs = append(d.OtherPkgs, p)
 			}
 		}
-		d.StrictMissing = det.Apt.Security - det.Apt.SecurityStrict
+		d.StrictMissing = det.Apt.SecurityNotStrict()
 	}
 	s.render(w, "invite", http.StatusOK, d)
 }

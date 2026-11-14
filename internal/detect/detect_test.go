@@ -142,3 +142,45 @@ func TestSinceIsCarried(t *testing.T) {
 		t.Errorf("nouveautés : %+v %+v", sec, apps)
 	}
 }
+
+func TestReconcileSecurity(t *testing.T) {
+	lines := []string{"pw.detect=1",
+		// openssl : une mise à jour de point (stable) remplace le correctif de sécurité.
+		"apt.pkg=openssl 3.5.6 3.5.8 0",
+		"apt.pkg=curl 8.14-4 8.14-7 1",
+		"apt.pkg=bash 5.2-9 5.2-10 0",
+		"apt.pkg=libnouvelle1 - 1.0 1",
+		"apt.strict_pkg=openssl", "apt.strict_pkg=curl", "apt.strict_pkg=libnouvelle1", "apt.strict_pkg=libautre2",
+		"apt.security_strict=4", "apt.total=4", "apt.security=2", "pw.end=1"}
+	r, err := Parse(lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Apt.Security != 3 || !r.Apt.Packages[0].Security || r.Apt.Packages[2].Security {
+		t.Errorf("sécurité : %d %+v", r.Apt.Security, r.Apt.Packages)
+	}
+	if r.Apt.StrictNew != 2 {
+		t.Errorf("nouvelles dépendances : %d", r.Apt.StrictNew)
+	}
+	if n := r.Apt.SecurityNotStrict(); n != 0 {
+		t.Errorf("hors strict : %d", n)
+	}
+}
+
+func TestMajorChange(t *testing.T) {
+	for _, c := range []struct {
+		inst, latest string
+		want         bool
+	}{
+		{"2.4.3", "v3.0.3", true},
+		{"release-2.6.1-tag", "v26.11.1", true},
+		{"2.19.11", "v2.20.23", false},
+		{"v1.6.0", "1.6.1", false},
+		{"4.0.0", "v4.4.0", false},
+	} {
+		a := App{Installed: c.inst, InstalledKnown: true, Latest: c.latest}
+		if got := a.MajorChange(); got != c.want {
+			t.Errorf("%s → %s : %v", c.inst, c.latest, got)
+		}
+	}
+}

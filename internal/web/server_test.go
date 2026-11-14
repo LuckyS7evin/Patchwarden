@@ -416,7 +416,7 @@ func TestGuestPage(t *testing.T) {
 		Nproc: 2, MemMB: 2048, RootUsedPct: 78,
 		CS: detect.CS{Entry: "legacy", Script: "termix", BaseAllowed: true, NeedCPU: 4, NeedRAMMB: 4096,
 			Prompts: []string{"Update Nginx configuration? [Y/n]:"}, PageURL: "https://community-scripts.org/scripts/termix"},
-		Apt: detect.Apt{Present: true, SecurityRepo: true, Total: 3, Security: 2, SecurityStrict: 1, IndexAgeHours: 0,
+		Apt: detect.Apt{Present: true, SecurityRepo: true, Total: 3, Security: 2, SecurityStrict: 1, StrictPackages: []string{"base-files"}, IndexAgeHours: 0,
 			Packages: []detect.Package{{Name: "libssl3t64", Old: "3.5.7-1", New: "3.5.7-2", Security: true}, {Name: "base-files", Old: "13.8", New: "13.9"}}},
 		Apps: []detect.App{{Name: "termix", Repo: "Termix-SSH/Termix", Installed: "release-2.6.1-tag", InstalledKnown: true, Latest: "v26.11.1",
 			ChangelogURL: "https://github.com/Termix-SSH/Termix/releases/tag/v26.11.1"}},
@@ -527,13 +527,13 @@ func TestSecurityPage(t *testing.T) {
 	h := newHarness(t)
 	h.login()
 	old := h.now.Add(-72 * time.Hour)
-	_ = h.store.Put("loki/104", detect.Result{At: h.now.Add(-time.Hour), Apt: detect.Apt{Present: true, Security: 2, SecurityStrict: 1, Packages: []detect.Package{
+	_ = h.store.Put("loki/104", detect.Result{At: h.now.Add(-time.Hour), Apt: detect.Apt{Present: true, Security: 2, SecurityStrict: 1, StrictPackages: []string{"libssl3t64"}, Packages: []detect.Package{
 		{Name: "libssl3t64", Old: "1", New: "2", Security: true, Since: old},
 		{Name: "curl", Old: "1", New: "2", Security: true, Since: h.now.Add(-time.Hour)},
 		{Name: "bash", Old: "1", New: "2"},
 	}}})
 	_, body := h.do("GET", "/securite", nil, nil)
-	for _, want := range []string{"2</span> correctifs de sécurité", "1</span> invité(s) concerné(s)", "termix", "il y a 3 jours", "libssl3t64", "curl", "le reste avec", `href="/invites/loki/104/action/securite"`} {
+	for _, want := range []string{"2</span> correctifs de sécurité", "1</span> invité(s) concerné(s)", "termix", "il y a 3 jours", "libssl3t64", "curl", "1 paquet(s)", "1 correctif(s) seulement avec", `href="/invites/loki/104/action/securite"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page sécurité sans %q", want)
 		}

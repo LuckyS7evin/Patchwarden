@@ -132,10 +132,12 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 		if det.Apt.SecurityStrict == 0 {
 			p.Blockers = append(p.Blockers, "aucune mise à jour de sécurité à appliquer")
 		}
-		p.Steps = append(p.Steps,
-			"apt-get update (index complet)",
-			fmt.Sprintf("apt-get --with-new-pkgs upgrade limité aux dépôts *-security : %d paquet(s)", det.Apt.SecurityStrict))
-		if miss := det.Apt.Security - det.Apt.SecurityStrict; miss > 0 {
+		install := fmt.Sprintf("apt-get --with-new-pkgs upgrade limité aux dépôts *-security : %d paquet(s)", det.Apt.SecurityStrict)
+		if det.Apt.StrictNew > 0 {
+			install += fmt.Sprintf(", dont %d nouvelle(s) dépendance(s)", det.Apt.StrictNew)
+		}
+		p.Steps = append(p.Steps, "apt-get update (index complet)", install)
+		if miss := det.Apt.SecurityNotStrict(); miss > 0 {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("%d correctif(s) de sécurité dépendent d'un paquet hors dépôt de sécurité : seul « Tout mettre à jour » les installera", miss))
 		}
 	case ActFull:
@@ -180,6 +182,13 @@ func (e *Engine) planCS(p *Plan, det detect.Result) {
 	}
 	var pending, unknown []string
 	for _, a := range det.Apps {
+		if a.MajorChange() {
+			w := fmt.Sprintf("changement de version majeure pour %s (%s → %s) : lisez le changelog avant d'appliquer", a.Name, a.Installed, a.Latest)
+			if a.ChangelogURL != "" {
+				w += " (" + a.ChangelogURL + ")"
+			}
+			p.Warnings = append(p.Warnings, w)
+		}
 		switch a.Status() {
 		case "mise à jour disponible":
 			pending = append(pending, fmt.Sprintf("%s %s → %s", a.Name, a.Installed, a.Latest))

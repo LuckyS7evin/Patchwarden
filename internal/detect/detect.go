@@ -93,8 +93,10 @@ type Apt struct {
 	Total          int      `json:"total"`
 	Security       int      `json:"security"`
 	SecurityStrict int      `json:"security_strict"`
-	SecurityRepo   bool     `json:"security_repo"`
-	UpgradeSimple  int      `json:"upgrade_simple"`
+	// StrictNew : parmi les paquets du mode strict, nouvelles dépendances.
+	StrictNew     int  `json:"strict_new"`
+	SecurityRepo  bool `json:"security_repo"`
+	UpgradeSimple int  `json:"upgrade_simple"`
 	// DistTotal : paquets qu'un dist-upgrade installerait (il peut supprimer
 	// des paquets) ; PatchWarden ne l'utilise jamais.
 	DistTotal      int       `json:"dist_total"`
@@ -207,7 +209,89 @@ func Parse(lines []string) (Result, error) {
 	if !begin || !end {
 		return r, ErrIncomplete
 	}
+	r.Apt.reconcileSecurity()
 	return r, nil
+}
+
+// reconcileSecurity complète le marquage « sécurité » avec la simulation
+// stricte. Quand une version plus récente que le correctif existe dans le
+// dépôt principal (mise à jour de point Debian), la simulation complète la
+// retient et son origine ne mentionne plus le dépôt de sécurité ; le paquet
+// a pourtant un correctif de sécurité en attente, visible en mode strict.
+// Les paquets que le mode strict installerait sans qu'ils soient déjà
+// présents sont de nouvelles dépendances, comptées à part.
+func (a *Apt) reconcileSecurity() {
+	strict := map[string]bool{}
+	for _, n := range a.StrictPackages {
+		strict[n] = true
+	}
+	known := map[string]bool{}
+	sec := 0
+	for i := range a.Packages {
+		p := &a.Packages[i]
+		known[p.Name] = true
+		if strict[p.Name] && p.Old != "-" {
+			p.Security = true
+		}
+		if p.Security {
+			sec++
+		}
+	}
+	a.Security = sec
+	a.StrictNew = 0
+	for i := range a.Packages {
+		if strict[a.Packages[i].Name] && a.Packages[i].Old == "-" {
+			a.StrictNew++
+		}
+	}
+	for n := range strict {
+		if !known[n] {
+			a.StrictNew++
+		}
+	}
+}
+
+// SecurityNotStrict compte les correctifs de sécurité que « Sécurité
+// uniquement » ne peut pas installer (dépendance hors dépôt de sécurité).
+func (a Apt) SecurityNotStrict() int {
+	strict := map[string]bool{}
+	for _, n := range a.StrictPackages {
+		strict[n] = true
+	}
+	n := 0
+	for _, p := range a.Packages {
+		if p.Security && !strict[p.Name] {
+			n++
+		}
+	}
+	return n
+}
+
+// MajorChange indique un changement du premier numéro de version (2.x → 3.x,
+// ou changement de schéma comme release-2.6.1-tag → v26.11.1).
+func (a App) MajorChange() bool {
+	if !a.UpdateAvailable() {
+		return false
+	}
+	x, y := majorOf(a.Installed), majorOf(a.Latest)
+	return x != "" && y != "" && x != y
+}
+
+func majorOf(v string) string {
+	start := -1
+	for i, c := range v {
+		if c >= '0' && c <= '9' {
+			if start < 0 {
+				start = i
+			}
+		} else if start >= 0 {
+			return strings.TrimLeft(v[start:i], "0")
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	return strings.TrimLeft(v[start:], "0")
 }
 
 // ParseVersions interprète la sortie de `lxc-versions`.

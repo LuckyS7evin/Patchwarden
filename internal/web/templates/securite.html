@@ -16,14 +16,14 @@
 {{if .Rows}}
 <div class="tablewrap">
 <table>
-  <thead><tr><th>Invité</th><th>Correctifs</th><th>« Sécurité uniquement »</th><th>En attente depuis</th><th>Détection</th><th></th></tr></thead>
+  <thead><tr><th>Invité</th><th>Correctifs</th><th>« Sécurité uniquement » installerait</th><th>En attente depuis</th><th>Détection</th><th></th></tr></thead>
   <tbody>
   {{range .Rows}}
   <tr>
     <td><a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{if .Guest.Name}}{{.Guest.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a> <span class="muted small">{{.Guest.Node}}/{{.Guest.VMID}}</span>
       {{if .Guest.Critical}}<span class="badge badge-crit">critique</span>{{end}}</td>
     <td class="num"><span class="badge badge-crit">{{.Det.Apt.Security}}</span></td>
-    <td class="num">{{.Det.Apt.SecurityStrict}}{{if lt .Det.Apt.SecurityStrict .Det.Apt.Security}} <span class="muted small">(le reste avec « Tout mettre à jour »)</span>{{end}}</td>
+    <td class="num">{{.Det.Apt.SecurityStrict}} paquet(s){{if .Det.Apt.StrictNew}} <span class="muted small">dont {{.Det.Apt.StrictNew}} nouvelle(s) dépendance(s)</span>{{end}}{{with .Det.Apt.SecurityNotStrict}} <span class="muted small">· {{.}} correctif(s) seulement avec « Tout mettre à jour »</span>{{end}}</td>
     <td>{{if not .Oldest.IsZero}}{{age .Oldest}}{{else}}?{{end}}</td>
     <td>{{age .Det.At}}{{if .Old}} <span class="badge badge-warn">ancienne</span>{{end}}</td>
     <td class="rowaction"><a class="btn btn-small" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/securite">Sécurité uniquement…</a></td>

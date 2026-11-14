@@ -341,12 +341,12 @@ func (c *Config) Validate() error {
 		if c.SSH.KeyFile == "" {
 			add("ssh.key_file est obligatoire (générez la clé avec : patchwarden ssh-keygen)")
 		} else if _, err := os.Stat(c.SSH.KeyFile); err != nil {
-			add("ssh.key_file illisible : %v", err)
+			add("ssh.key_file illisible : %v (créez la clé avec « patchwarden ssh-keygen », étape 6 du README, ou commentez [ssh.nodes] pour rester en lecture seule)", err)
 		}
 		if c.SSH.KnownHosts == "" {
 			add("ssh.known_hosts est obligatoire : les clés d'hôte des nœuds sont toujours vérifiées")
 		} else if _, err := os.Stat(c.SSH.KnownHosts); err != nil {
-			add("ssh.known_hosts illisible : %v", err)
+			add("ssh.known_hosts illisible : %v (remplissez-le avec ssh-keyscan, étape 6 du README, ou commentez [ssh.nodes] pour rester en lecture seule)", err)
 		}
 		for n, a := range c.SSH.Nodes {
 			if !nameRe.MatchString(n) {

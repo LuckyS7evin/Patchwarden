@@ -60,10 +60,12 @@ known_hosts = "/etc/patchwarden/known_hosts"    # clés d'hôte des nœuds, touj
 connect_timeout = "10s"
 
 # Nom du nœud Proxmox = adresse SSH (port 22 par défaut). Changer d'IP = modifier ici.
-[ssh.nodes]
-loki = "192.168.0.141"
-tyr = "192.168.0.43"
-odin = "192.168.0.49"
+# À décommenter seulement à l'étape 6 du README, une fois la clé et known_hosts créés :
+# tant que cette section est commentée, PatchWarden reste en lecture seule.
+# [ssh.nodes]
+# loki = "192.168.0.141"
+# tyr = "192.168.0.43"
+# odin = "192.168.0.49"
 
 [jobs]
 data_dir = "/var/lib/patchwarden"   # historique des tâches et dernières détections

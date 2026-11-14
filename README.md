@@ -100,6 +100,7 @@ nano /etc/patchwarden/config.toml   # username, password_hash, [[proxmox]] url /
 nano /etc/patchwarden/patchwarden.env
 set -a; . /etc/patchwarden/patchwarden.env; set +a
 patchwarden check-config         # valide le fichier et interroge chaque point d'accès
+                                 # (laissez [ssh.nodes] commenté jusqu'à l'étape 6)
 ```
 
 Exemple de sortie attendue :
@@ -162,7 +163,7 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub     # …à comparer, sur chaqu
 chmod 640 /etc/patchwarden/known_hosts && chgrp patchwarden /etc/patchwarden/known_hosts
 ```
 
-Déclarez ensuite les nœuds dans la section `[ssh]` de `config.toml`, puis vérifiez :
+Décommentez ensuite la section `[ssh.nodes]` de `config.toml` (adresses des nœuds), puis vérifiez :
 
 ```bash
 patchwarden check-config

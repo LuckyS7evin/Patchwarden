@@ -159,3 +159,41 @@ func mustEd25519(t *testing.T) ed25519.PrivateKey {
 	}
 	return k
 }
+
+// Régression : un nœud Proxmox présente plusieurs clés d'hôte (ed25519, ECDSA,
+// RSA). known_hosts n'en contient qu'une (ed25519) : la connexion doit réussir
+// en négociant ce type, et non échouer en « clé différente ».
+func TestKnownHostsWithSeveralHostKeys(t *testing.T) {
+	srv := sshtest.StartMultiKey(t, func(_ string, stdout, _ io.Writer) int {
+		fmt.Fprintln(stdout, "pw.wrapper_version=1")
+		return 0
+	})
+	dir := t.TempDir()
+	keyFile, kh := dir+"/id", dir+"/known_hosts"
+	blk, _ := ssh.MarshalPrivateKey(srv.ClientPriv, "test")
+	_ = os.WriteFile(keyFile, pem.EncodeToMemory(blk), 0o600)
+	cfg := config.SSH{User: "root", KeyFile: keyFile, KnownHosts: kh, Nodes: map[string]string{"loki": srv.Addr}}
+	cfg.ConnectTimeout.Duration = 5 * time.Second
+
+	for name, key := range map[string]ssh.PublicKey{"ed25519": srv.HostKey, "ecdsa": srv.ExtraHostKey} {
+		_ = os.WriteFile(kh, []byte(knownhosts.Line([]string{srv.Addr}, key)+"\n"), 0o600)
+		e, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		code, err := e.Run(context.Background(), "loki", "ping", func(l Line) { out = append(out, l.Text) })
+		if err != nil || code != 0 || len(out) != 1 {
+			t.Errorf("known_hosts avec la seule clé %s : %v (code %d, %q)", name, err, code, out)
+		}
+	}
+
+	// Une vraie clé différente reste refusée.
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	otherPub, _ := ssh.NewPublicKey(other.Public())
+	_ = os.WriteFile(kh, []byte(knownhosts.Line([]string{srv.Addr}, otherPub)+"\n"), 0o600)
+	e, _ := New(cfg)
+	if _, err := e.Run(context.Background(), "loki", "ping", func(Line) {}); err == nil || !strings.Contains(err.Error(), "DIFFÉRENTE") {
+		t.Errorf("clé usurpée acceptée : %v", err)
+	}
+}

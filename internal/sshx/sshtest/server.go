@@ -5,7 +5,9 @@ package sshtest
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/binary"
 	"io"
@@ -21,18 +23,26 @@ type Handler func(command string, stdout, stderr io.Writer) int
 
 // Server est un serveur SSH de test.
 type Server struct {
-	Addr       string
-	HostKey    ssh.PublicKey
-	ClientKey  ssh.Signer
-	ClientPriv ed25519.PrivateKey
-	Commands   []string
-	mu         sync.Mutex
-	listener   net.Listener
-	authorized ssh.PublicKey
+	Addr    string
+	HostKey ssh.PublicKey
+	// ExtraHostKey : clé ECDSA supplémentaire (StartMultiKey uniquement).
+	ExtraHostKey ssh.PublicKey
+	ClientKey    ssh.Signer
+	ClientPriv   ed25519.PrivateKey
+	Commands     []string
+	mu           sync.Mutex
+	listener     net.Listener
+	authorized   ssh.PublicKey
 }
 
 // Start démarre un serveur qui n'accepte que la clé cliente générée.
-func Start(t *testing.T, h Handler) *Server {
+func Start(t *testing.T, h Handler) *Server { return start(t, h, false) }
+
+// StartMultiKey démarre un serveur qui présente, comme un nœud Proxmox, une
+// clé d'hôte ECDSA en plus de la clé ed25519 (HostKey). ExtraHostKey est l'ECDSA.
+func StartMultiKey(t *testing.T, h Handler) *Server { return start(t, h, true) }
+
+func start(t *testing.T, h Handler, multi bool) *Server {
 	t.Helper()
 	_, hostPriv, _ := ed25519.GenerateKey(rand.Reader)
 	hostSigner, err := ssh.NewSignerFromKey(hostPriv)
@@ -54,6 +64,18 @@ func Start(t *testing.T, h Handler) *Server {
 		},
 	}
 	cfg.AddHostKey(hostSigner)
+	if multi {
+		ek, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		es, err := ssh.NewSignerFromKey(ek)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.AddHostKey(es)
+		s.ExtraHostKey = es.PublicKey()
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

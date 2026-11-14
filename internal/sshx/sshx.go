@@ -90,7 +90,7 @@ func (e *Executor) Run(ctx context.Context, node, command string, out func(Line)
 		User:              e.user,
 		Auth:              []ssh.AuthMethod{ssh.PublicKeys(e.signer)},
 		HostKeyCallback:   e.hostKey,
-		HostKeyAlgorithms: nil,
+		HostKeyAlgorithms: knownAlgorithms(e.hostKey, addr),
 		Timeout:           e.dialTimeout,
 	})
 	if err != nil {
@@ -155,6 +155,54 @@ func (e *Executor) Run(ctx context.Context, node, command string, out func(Line)
 		return exitErr.ExitStatus(), nil
 	}
 	return -1, fmt.Errorf("exécution sur %s : %w", node, err)
+}
+
+// probeKey est une fausse clé d'un type qui ne figure jamais dans known_hosts :
+// la présenter au rappel de vérification renvoie la liste des clés connues
+// pour cet hôte (knownhosts.KeyError.Want), sans rien accepter.
+type probeKey struct{}
+
+func (probeKey) Type() string                        { return "patchwarden-sonde" }
+func (probeKey) Marshal() []byte                     { return []byte("patchwarden-sonde") }
+func (probeKey) Verify([]byte, *ssh.Signature) error { return errors.New("sonde") }
+
+// knownAlgorithms renvoie les algorithmes de clé d'hôte à demander au nœud :
+// ceux des clés enregistrées dans known_hosts. Sans cela, le client Go demande
+// d'abord ECDSA ; un nœud Proxmox ayant aussi une clé ECDSA, elle serait
+// comparée à la clé ed25519 enregistrée et refusée comme « différente ».
+// Renvoie nil (algorithmes par défaut) si l'hôte est inconnu ou si le rappel
+// n'est pas un known_hosts.
+func knownAlgorithms(cb ssh.HostKeyCallback, addr string) []string {
+	if cb == nil {
+		return nil
+	}
+	tcp, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		return nil
+	}
+	var kerr *knownhosts.KeyError
+	if err := cb(addr, tcp, probeKey{}); !errors.As(err, &kerr) || len(kerr.Want) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var algos []string
+	add := func(a ...string) {
+		for _, x := range a {
+			if !seen[x] {
+				seen[x] = true
+				algos = append(algos, x)
+			}
+		}
+	}
+	for _, k := range kerr.Want {
+		switch t := k.Key.Type(); t {
+		case ssh.KeyAlgoRSA:
+			add(ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA)
+		default:
+			add(t)
+		}
+	}
+	return algos
 }
 
 const maxLine = 64 << 10

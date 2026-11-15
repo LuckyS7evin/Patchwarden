@@ -255,6 +255,16 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | Restauration des CPU | Le wrapper attend aussi que le CT revoie ses CPU d'origine (non bloquant), pour que la détection de fin soit juste |
 | VMs | Jalon 7 (avec le guest agent) |
 
+Premier essai réel (15/11/2026, Forgejo, CT 106, LVM-thin à 82 %) : snapshot en 1 s,
+« Sécurité uniquement » (23 paquets), retour arrière en 1 min (dont 47 s de démarrage du CT),
+détection de fin cohérente (les 23 correctifs reviennent). Seul défaut : description
+illisible (« s��curit�� »). Cause : les commandes `pct` décodent leurs arguments selon la
+locale (`PVE::JSONSchema`, `decode('locale', …)`) et le wrapper tourne en `LC_ALL=C`.
+Wrapper v6 : `pct snapshot` lancé en `LC_ALL=C.UTF-8`. Le faux `pct` des tests reproduit ce
+décodage. Avertissement LVM vu au passage : le pool thin `pve/data` est surréservé
+(192 Gio de volumes pour un pool plus petit) ; s'il se remplit, tous les invités dessus
+sont touchés.
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).

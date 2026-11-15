@@ -34,7 +34,13 @@ snapshot)
 	# pct snapshot <vmid> <nom> --description <texte>
 	echo "pct snapshot $2 $3" >> "$PCT_SET_LOG"
 	[ -n "$FAKE_SNAP_FAIL" ] && { echo "snapshot feature is not available" >&2; exit 1; }
-	echo "$3 $(date +%s) $5" >> "$FAKE_GUEST/snaps"; exit 0 ;;
+	# Comme Proxmox : arguments décodés selon la locale ; hors UTF-8, chaque
+	# octet non ASCII devient « � ».
+	case "${LC_ALL:-}" in
+	*UTF-8*) d="$5" ;;
+	*) d="$(printf '%s' "$5" | perl -CO -pe 's/[\x80-\xff]/\x{FFFD}/g')" ;;
+	esac
+	echo "$3 $(date +%s) $d" >> "$FAKE_GUEST/snaps"; exit 0 ;;
 delsnapshot)
 	echo "pct delsnapshot $2 $3" >> "$PCT_SET_LOG"
 	grep -v "^$3 " "$FAKE_GUEST/snaps" > "$FAKE_GUEST/snaps.tmp"; mv "$FAKE_GUEST/snaps.tmp" "$FAKE_GUEST/snaps"; exit 0 ;;

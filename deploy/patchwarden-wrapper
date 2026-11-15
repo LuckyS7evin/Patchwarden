@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 5) :
+# Verbes (version 6) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -48,7 +48,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=5
+WRAPPER_VERSION=6
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -554,7 +554,10 @@ run_snapshot() {
 	[[ -n "$desc" ]] || desc="PatchWarden"
 	log "lxc-snapshot ${VMID} ${SNAP}"
 	echo "PW: création du snapshot ${SNAP}"
-	if ! pct snapshot "$VMID" "$SNAP" --description "$desc" </dev/null; then
+	# Les commandes pct décodent leurs arguments selon la locale
+	# (PVE::JSONSchema, decode('locale')) : en LC_ALL=C, chaque octet accentué
+	# de la description deviendrait « � ».
+	if ! LC_ALL=C.UTF-8 pct snapshot "$VMID" "$SNAP" --description "$desc" </dev/null; then
 		echo "PW-ERREUR: pct snapshot a échoué : mise à jour annulée"
 		exit 43
 	fi

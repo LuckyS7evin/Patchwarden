@@ -14,6 +14,7 @@ const StaleDetection = 48 * time.Hour
 
 type secRow struct {
 	Guest    inventory.Guest
+	Icon     string
 	Det      detect.Result
 	Packages []detect.Package // correctifs de sécurité, plus anciens d'abord
 	Oldest   time.Time
@@ -54,7 +55,7 @@ func (s *Server) securityPage(w http.ResponseWriter, r *http.Request, se *sessio
 		if !ok || det.Apt.Security == 0 {
 			continue
 		}
-		row := secRow{Guest: g, Det: det, Oldest: det.OldestSecurity(), Old: old}
+		row := secRow{Guest: g, Det: det, Oldest: det.OldestSecurity(), Old: old, Icon: iconURL(g, &det)}
 		for _, p := range det.Apt.Packages {
 			if p.Security {
 				row.Packages = append(row.Packages, p)

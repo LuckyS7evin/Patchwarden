@@ -74,6 +74,7 @@ type Server struct {
 	now     func() time.Time
 	sess    *sessions
 	thr     *throttle
+	icons   *iconStore
 	pages   map[string]*template.Template
 }
 
@@ -82,6 +83,8 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 	s := &Server{cfg: cfg, inv: inv, deps: deps, log: log, version: version, now: time.Now}
 	s.sess = newSessions(cfg.Auth.SessionDuration.Duration, func() time.Time { return s.now() })
 	s.thr = newThrottle(func() time.Time { return s.now() })
+	icons := cfg.UI.Icons == nil || *cfg.UI.Icons
+	s.icons = newIconStore(cfg.Jobs.DataDir, cfg.UI.IconBase, icons && cfg.Jobs.DataDir != "")
 	funcs := template.FuncMap{
 		"join":  strings.Join,
 		"age":   func(t time.Time) string { return humanAge(s.now().Sub(t)) },
@@ -140,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	static, _ := fs.Sub(assets, "static")
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
+	mux.HandleFunc("GET /icones", s.authed(s.iconHandler))
 	mux.HandleFunc("GET /sante", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /connexion", s.loginForm)
 	mux.HandleFunc("POST /connexion", s.sameOrigin(s.loginSubmit))
@@ -315,6 +319,8 @@ type nodeGroup struct {
 // tâche en cours et les actions possibles.
 type row struct {
 	inventory.Guest
+	Icon      string
+	ShownTags []string // tags affichés (sans le tag community-scripts, déjà en badge)
 	Det       *detect.Result
 	Active    *jobs.Job
 	CanDetect bool
@@ -332,6 +338,12 @@ func (s *Server) rowFor(g inventory.Guest) row {
 	if s.deps.Jobs != nil {
 		if j, ok := s.deps.Jobs.ActiveFor(t); ok {
 			r.Active = &j
+		}
+	}
+	r.Icon = iconURL(g, r.Det)
+	for _, t := range g.Tags {
+		if !strings.EqualFold(t, s.cfg.Policy.CommunityScriptTag) || s.cfg.Policy.CommunityScriptTag == "" {
+			r.ShownTags = append(r.ShownTags, t)
 		}
 	}
 	if s.deps.Engine != nil {

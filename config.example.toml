@@ -100,6 +100,13 @@ cache_ttl = "6h"
 # [schedule]
 # detect_at = ["03:40"]
 
+# Interface. Icônes des applis et des OS : selfh.st/icons (CC BY 4.0), téléchargées par
+# PatchWarden (pas par le navigateur) puis gardées dans data_dir/icons. Sans accès
+# Internet, ou avec icons = false : une pastille avec l'initiale.
+# [ui]
+# icons = true
+# icon_base = "https://cdn.jsdelivr.net/gh/selfhst/icons/webp"
+
 # Notifications : une section par cible. Types : ntfy, gotify, webhook.
 # Événements : securite (nouveaux correctifs), applis (nouvelles versions),
 # echec (mise à jour ou détection planifiée en échec), succes (mise à jour réussie).

@@ -54,7 +54,11 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
   échecs ; fin de chaque mise à jour réelle (réussite ou échec). `patchwarden notify-test`
   vérifie les cibles ;
 - **vue Sécurité** : correctifs de sécurité en attente par invité, les plus anciens d'abord,
-  et LXC sans détection récente.
+  et LXC sans détection récente ;
+- **interface** : thème clair, sombre ou automatique (bouton « Thème » en haut à droite,
+  mémorisé par le navigateur) ; icône de chaque appli ou OS ([selfh.st/icons](https://selfh.st/icons),
+  CC BY 4.0, mises en cache par PatchWarden, réglage `[ui]`) ; une migration par étapes
+  (le script demande de relancer `update`) est signalée dans le résumé de la tâche.
 
 Pas encore de snapshot automatique avant mise à jour (prochain jalon) : gardez vos
 sauvegardes PBS à jour pour les invités sensibles.
@@ -276,7 +280,7 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v2) | Effet |
+| Verbe (wrapper v3) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
@@ -298,8 +302,11 @@ de verrou dans `/run/lock`, et lance `pct set` sur le CT visé (ressources) ; ri
 - Un seul compte, mot de passe haché en bcrypt, comparaison en temps constant.
   Blocage de 15 minutes après 5 échecs pour une même IP.
 - Cookie de session `HttpOnly` et `SameSite=Strict`, jeton CSRF et contrôle de l'origine
-  sur chaque formulaire, en-têtes CSP stricts. Le seul JavaScript (`tache.js`, servi par
-  PatchWarden) affiche le journal en direct.
+  sur chaque formulaire, en-têtes CSP stricts. Le seul JavaScript, servi par PatchWarden,
+  affiche le journal en direct (`tache.js`) et change de thème (`theme.js`).
+- Les icônes sont téléchargées par le serveur depuis `ui.icon_base` (https uniquement),
+  vérifiées (format WebP, 512 Ko maximum) et servies depuis le cache local : le navigateur
+  ne contacte aucun site tiers.
 - Clés d'hôte SSH toujours vérifiées ; une clé différente de celle enregistrée bloque la connexion.
 - Les scripts community-scripts ne sont lus que depuis les sources autorisées
   (`community_scripts.allowed_bases`) : un invité compromis ne peut pas faire télécharger

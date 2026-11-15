@@ -49,7 +49,16 @@ type Config struct {
 	CS        CS         `toml:"community_scripts"`
 	Upstream  Upstream   `toml:"upstream"`
 	Schedule  Schedule   `toml:"schedule"`
+	UI        UI         `toml:"ui"`
 	Notify    []Notify   `toml:"notify"`
+}
+
+// UI règle l'interface.
+type UI struct {
+	// Icons : icônes des applications et des OS (selfh.st/icons, CC BY 4.0),
+	// téléchargées par PatchWarden et mises en cache. Défaut : true.
+	Icons    *bool  `toml:"icons"`
+	IconBase string `toml:"icon_base"`
 }
 
 // Schedule règle la détection automatique (lecture seule).
@@ -267,6 +276,13 @@ func (c *Config) applyDefaults() {
 	if c.CS.WebsiteURL == "" {
 		c.CS.WebsiteURL = "https://community-scripts.org"
 	}
+	if c.UI.Icons == nil {
+		t := true
+		c.UI.Icons = &t
+	}
+	if c.UI.IconBase == "" {
+		c.UI.IconBase = "https://cdn.jsdelivr.net/gh/selfhst/icons/webp"
+	}
 	if c.Upstream.GitHubAPI == "" {
 		c.Upstream.GitHubAPI = "https://api.github.com"
 	}
@@ -375,6 +391,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Inventory.Timeout.Duration <= 0 {
 		add("inventory.timeout doit être positif")
+	}
+	if u, err := url.Parse(c.UI.IconBase); err != nil || u.Scheme != "https" || u.Host == "" {
+		add("ui.icon_base : URL https attendue, obtenu %q", c.UI.IconBase)
 	}
 	for _, t := range c.Schedule.DetectAt {
 		if _, err := time.Parse("15:04", t); err != nil {

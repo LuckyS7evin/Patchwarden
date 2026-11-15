@@ -6,6 +6,7 @@
 <title>{{.Title}} · PatchWarden</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="/static/icone.svg" type="image/svg+xml">
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <header class="topbar">
@@ -17,6 +18,7 @@
     <a href="/taches" {{if eq .Nav "taches"}}aria-current="page"{{end}}>Tâches</a>
   </nav>
   <div class="userbox">
+    <button type="button" class="btn btn-link theme-toggle" id="theme-toggle" aria-label="Thème">Thème : auto</button>
     <span>{{.User}}</span>
     <form method="post" action="/deconnexion">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -28,7 +30,7 @@
 <main>
 {{block "content" .}}{{end}}
 </main>
-<footer>PatchWarden {{.Version}} · aucune action n'est lancée sans confirmation</footer>
+<footer>PatchWarden {{.Version}} · aucune action n'est lancée sans confirmation · icônes <a href="https://selfh.st/icons" target="_blank" rel="noopener noreferrer">selfh.st/icons</a> (CC BY 4.0)</footer>
 {{block "scripts" .}}{{end}}
 </body>
 </html>

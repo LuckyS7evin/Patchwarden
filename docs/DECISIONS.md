@@ -175,6 +175,31 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 (libssl, par exemple) tant qu'ils ne sont pas redémarrés ; à repérer via les fichiers
 `(deleted)` de `/proc/*/maps`.
 
+## Premier « Tout mettre à jour » réel (15/11/2026, Termix)
+
+- apt : 55 paquets, code 0.
+- `update` community-scripts : ressources augmentées par le wrapper puis restaurées ;
+  réponse enregistrée « oui » à « Update Nginx configuration? » (nginx.conf remplacé,
+  ancien fichier sauvegardé par le script) ; sauvegarde du script dans `/opt/termix.backup`
+  (disque de 33 % à 43 %).
+- Le script ne saute pas directement à la dernière version : il migre par étapes
+  (`release-2.6.1-tag` → `release-2.9.2-tag`) et termine par « Run update again ».
+  La détection de fin montre donc encore v26.11.1 disponible. Décision : PatchWarden ne
+  relance pas tout seul (chaque étape doit pouvoir être vérifiée) ; le résumé de la tâche
+  le signale (« le script demande de relancer update ») et il suffit de relancer
+  « Tout mettre à jour ».
+- Les délais DNS affichés par les en-têtes curl du script sont sans conséquence.
+
+## Retours sur l'interface (15/11/2026)
+
+| Retour | Décision |
+| :--- | :--- |
+| Boutons « Simuler » / « Appliquer » mal alignés, « Simuler » peu visible | Deux cadres de même hauteur, boutons pleine largeur alignés en bas ; « Simuler » en bouton secondaire coloré, « Appliquer » en rouge |
+| Colonnes de l'inventaire non alignées entre nœuds | Largeurs de colonnes fixes (`table-layout: fixed`) identiques pour tous les tableaux ; tag community-scripts masqué (déjà en badge) |
+| Icônes des applis et des OS | selfh.st/icons (CC BY 4.0) : nom du script, puis nom de l'invité, puis OS ; alias pour les noms qui diffèrent ; téléchargées et mises en cache par le serveur (CSP inchangée), absence mémorisée 7 jours, initiale en repli |
+| Pas de bascule clair/sombre | Bouton « Thème : auto / clair / sombre », mémorisé dans le navigateur |
+| Technologie de l'interface | Rendu serveur (Go `html/template`), CSS écrit à la main, deux petits fichiers JS, pas d’étape de compilation : choix de légèreté (un seul binaire, aucune dépendance côté navigateur). Refonte visuelle à discuter |
+
 ## Feuille de route (validée le 14/11/2026, propositions 1 à 11 retenues, 12 écartée)
 
 | Jalon | Contenu |

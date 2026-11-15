@@ -66,13 +66,14 @@
 <section class="node">
   <h2>{{.Node}} <span class="muted">· {{len .Rows}}</span></h2>
   <div class="tablewrap">
-  <table>
+  <table class="inv">
+    <colgroup><col class="c-id"><col class="c-name"><col class="c-type"><col class="c-state"><col class="c-upd"><col class="c-tags"><col class="c-flags"><col class="c-act"></colgroup>
     <thead><tr><th>ID</th><th>Nom</th><th>Type</th><th>État</th><th>Mises à jour</th><th class="col-tags">Tags</th><th>Particularités</th><th></th></tr></thead>
     <tbody>
     {{range .Rows}}
       <tr{{if .Stale}} class="stale"{{end}}>
         <td class="num">{{.VMID}}</td>
-        <td><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a></td>
+        <td><span class="namecell"><img class="appicon" src="{{.Icon}}" alt="" width="22" height="22" loading="lazy"><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a></span></td>
         <td>{{.TypeLabel}}</td>
         <td><span class="status status-{{.Status}}"{{if eq (statusLabel .Status) "inconnu"}} title="Le nœud ne publie pas l'état de ses invités au cluster (vérifiez le service pvestatd sur {{.Node}})"{{end}}>{{statusLabel .Status}}</span></td>
         <td class="updates">
@@ -86,7 +87,7 @@
             {{end}}
           {{else}}<span class="muted small">non détecté</span>{{end}}
         </td>
-        <td class="col-tags">{{range .Tags}}<span class="tag">{{.}}</span>{{end}}</td>
+        <td class="col-tags">{{range .ShownTags}}<span class="tag">{{.}}</span>{{end}}</td>
         <td>
           {{if .CommunityScript}}<span class="badge badge-cs">community-scripts</span>{{end}}
           {{if .Critical}}<span class="badge badge-crit" title="Motif : {{.CriticalReason}}">confirmation renforcée</span>{{end}}

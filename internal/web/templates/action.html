@@ -37,15 +37,17 @@
 <section class="card">
   <h2>Lancer</h2>
   <div class="launch">
-    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}">
+    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="launch-box">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <input type="hidden" name="simulation" value="1">
-      <button type="submit" class="btn">Simuler</button>
+      <h3>1. Simuler</h3>
       <p class="muted small">apt en simulation (<code>apt-get -s</code>) ; l'update community-scripts n'a pas de mode simulation : il est seulement décrit. Rien n'est modifié.</p>
+      <button type="submit" class="btn btn-secondary">Simuler</button>
     </form>
-    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="apply">
+    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="launch-box apply">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <input type="hidden" name="simulation" value="0">
+      <h3>2. Appliquer</h3>
       <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : appliquer « {{.Action.Label}} » à <strong>{{.Guest.Name}}</strong></label>
       {{if .NeedName}}
       <label>Invité critique : saisissez son nom (<code>{{.Guest.Name}}</code>)

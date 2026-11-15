@@ -20,7 +20,7 @@
   <tbody>
   {{range .Rows}}
   <tr>
-    <td><a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{if .Guest.Name}}{{.Guest.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a> <span class="muted small">{{.Guest.Node}}/{{.Guest.VMID}}</span>
+    <td><img class="appicon" src="{{.Icon}}" alt="" width="22" height="22" loading="lazy"><a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{if .Guest.Name}}{{.Guest.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a> <span class="muted small">{{.Guest.Node}}/{{.Guest.VMID}}</span>
       {{if .Guest.Critical}}<span class="badge badge-crit">critique</span>{{end}}</td>
     <td class="num"><span class="badge badge-crit">{{.Det.Apt.Security}}</span></td>
     <td class="num">{{.Det.Apt.SecurityStrict}} paquet(s){{if .Det.Apt.StrictNew}} <span class="muted small">dont {{.Det.Apt.StrictNew}} nouvelle(s) dépendance(s)</span>{{end}}{{with .Det.Apt.SecurityNotStrict}} <span class="muted small">· {{.}} correctif(s) seulement avec « Tout mettre à jour »</span>{{end}}</td>

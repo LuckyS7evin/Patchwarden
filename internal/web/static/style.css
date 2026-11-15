@@ -368,3 +368,7 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
   .trk .ln { width: auto; height: auto; background: none; }
   .trk .ln span { position: static; transform: none; padding: 0; background: none; }
 }
+
+/* Onglet Docker : titre du groupe et bouton sur une ligne. */
+.dh { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.dh h2 { margin: 0; }

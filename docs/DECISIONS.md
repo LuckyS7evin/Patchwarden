@@ -223,7 +223,7 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | 5 ✅ | Snapshots avant mise à jour (exigence initiale), retour arrière en un clic (5) |
 | 6 ✅ | Lots, regroupement par tags (6), redémarrages requis (8) |
 | 7 ✅ | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
-| 8 | Docker via l'API Portainer |
+| 8 ✅ | Docker via l'API Portainer (à recetter) |
 | 9 | Vérification après mise à jour (4), fenêtres de maintenance (9), sécurité automatique (10, après les snapshots), métriques Prometheus (11) |
 
 Écartée pour l'instant : comptes multiples / OIDC (12).
@@ -313,3 +313,19 @@ sinon) plutôt que des encadrés.
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).
 8. LXC PatchWarden : IP, accès Internet, jeton GitHub en lecture seule.
 12. Versions de PVE et des OS d'invités ; `pve-ups` et Dev inclus ; langue de l'interface.
+
+## Jalon 8 : Docker (16/11/2026)
+
+| Sujet | Décision |
+| :--- | :--- |
+| Inventaire | Par la détection (wrapper v9) : `docker inspect` de chaque conteneur (image, empreintes, labels compose et OCI), dans le LXC ou la VM. Aucun agent |
+| Comparaison | PatchWarden interroge lui-même les registres (API de distribution OCI, jeton anonyme, `HEAD` du manifeste : ne compte pas dans la limite de téléchargements de Docker Hub). Image à jour si l'empreinte publiée du tag figure dans les `RepoDigests` locaux. lscr.io est interrogé sur ghcr.io (miroir). Cache 6 h |
+| Tags épinglés | Une version plus récente (même forme : préfixe, nombre de composants, suffixe) est **signalée, jamais appliquée** ; préversions ignorées |
+| Lien changelog | ghcr.io → dépôt GitHub ; linuxserver → `docker-<nom>` ; label OCI `source` seulement si le dépôt porte le nom de l'image (ErsatzTV) ; sinon la page du registre |
+| Groupes | Stack Portainer (dossier `/data/compose/<id>`), projet compose classique, `docker run`. Une mise à jour porte sur un groupe entier |
+| Stacks Portainer | `PUT /api/stacks/{id}` avec le fichier et les variables relus dans Portainer, `pullImage: true`, `prune: false` ; stacks Git : `git/redeploy` sur la même référence. Instance et environnement trouvés par les conteneurs communs (aucun réglage par invité, insensible aux changements d'IP). Refus : stack arrêtée, autre type que compose, stack contenant Portainer ou son agent |
+| Projets compose | Verbe `docker-compose` du wrapper : dossier et fichiers lus dans les labels **dans l'invité**, `pull` puis `up -d --no-deps` des services démarrés seulement (un service arrêté le reste) |
+| `docker run` | Détection seulement : options de création inconnues |
+| Snapshot | Celui de l'invité, nommé `pw-…-docker` (même règles, même rétention) |
+| Images anciennes | Laissées sur le disque (pas de `docker image prune` automatique) |
+| Watchtower | Signalé (« À traiter », fiche) : à arrêter |

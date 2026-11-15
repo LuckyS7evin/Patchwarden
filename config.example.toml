@@ -112,6 +112,21 @@ cache_ttl = "6h"
 # keep = 1                 # snapshots PatchWarden gardés par invité (les manuels ne sont jamais touchés)
 # max_storage_pct = 90     # snapshot (donc mise à jour) refusé au-delà de ce remplissage
 
+# Docker : comparaison des images aux registres publics (sans compte), cache 6 h.
+# [docker]
+# registry_check = true
+# cache_ttl = "6h"
+
+# Instances Portainer : leurs stacks sont mises à jour par l'API (re-déploiement avec
+# téléchargement des images, même fichier, mêmes variables). Une section par instance ;
+# les invités sont rattachés automatiquement à leur environnement. Sans section, les
+# stacks Portainer sont détectées mais pas mises à jour. Voir README, étape 8.
+# [[portainer]]
+# name = "docker"
+# url = "https://192.168.0.50:9443"
+# token_env = "PATCHWARDEN_PORTAINER_DOCKER"   # jeton d'accès (Mon compte → Jetons d'accès)
+# fingerprint = "AA:BB:…"                      # certificat auto-signé ; ou ca_file ; vides : autorités du système
+
 # Interface. Icônes des applis et des OS : selfh.st/icons (CC BY 4.0), téléchargées par
 # PatchWarden (pas par le navigateur) puis gardées dans data_dir/icons. Sans accès
 # Internet, ou avec icons = false : une pastille avec l'initiale.

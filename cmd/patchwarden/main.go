@@ -32,7 +32,9 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"github.com/LuckyS7evin/patchwarden/internal/notify"
+	"github.com/LuckyS7evin/patchwarden/internal/portainer"
 	"github.com/LuckyS7evin/patchwarden/internal/proxmox"
+	"github.com/LuckyS7evin/patchwarden/internal/registry"
 	"github.com/LuckyS7evin/patchwarden/internal/schedule"
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
@@ -205,6 +207,20 @@ func serve(args []string) error {
 		Batches:    batches,
 		EOL:        eol.New(cfg.EOL.Source, nil),
 	}
+	if *cfg.Docker.RegistryCheck {
+		eng.Registry = registry.New(cfg.Docker.CacheTTL.Duration, nil)
+	}
+	if len(cfg.Portainer) > 0 {
+		eng.Portainers = map[string]engine.Portainer{}
+		for _, pc := range cfg.Portainer {
+			c, err := portainer.New(pc, 30*time.Second)
+			if err != nil {
+				return fmt.Errorf("portainer %s : %w", pc.Name, err)
+			}
+			eng.Portainers[pc.Name] = c
+			eng.PortainerOrder = append(eng.PortainerOrder, pc.Name)
+		}
+	}
 	jm.OnFinish = eng.NotifyJob
 	if cfg.SSH.Enabled() {
 		ex, err := sshx.New(cfg.SSH)
@@ -331,6 +347,36 @@ func checkConfig(args []string) error {
 		}
 	} else {
 		fmt.Println("Pas de section [ssh.nodes] : lecture seule.")
+	}
+	if len(cfg.Portainer) > 0 {
+		fmt.Println("Portainer :")
+	}
+	for _, pc := range cfg.Portainer {
+		c, err := portainer.New(pc, 15*time.Second)
+		if err != nil {
+			failed++
+			fmt.Printf("  ✘ %s : %v\n", pc.Name, err)
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		eps, err := c.Endpoints(ctx)
+		var stacks []portainer.Stack
+		if err == nil {
+			stacks, err = c.Stacks(ctx)
+		}
+		cancel()
+		if err != nil {
+			failed++
+			fmt.Printf("  ✘ %s : %v\n", pc.Name, err)
+			continue
+		}
+		up := 0
+		for _, ep := range eps {
+			if ep.Status == 1 {
+				up++
+			}
+		}
+		fmt.Printf("  ✔ %s : %d environnement(s) dont %d joignable(s), %d stack(s) visibles par le jeton\n", pc.Name, len(eps), up, len(stacks))
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d vérification(s) en erreur", failed)

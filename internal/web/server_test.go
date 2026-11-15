@@ -36,6 +36,8 @@ type fakeEngine struct {
 	batch               []engine.BatchRequest
 	batchDry, batchStop bool
 	batches             []engine.Batch
+	store               *detect.Store
+	dockerKeys          []string
 }
 
 func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
@@ -181,6 +183,47 @@ func (f *fakeEngine) Execute(g inventory.Guest, a engine.Action, dry bool, user 
 	})
 }
 
+func (f *fakeEngine) PlanDocker(g inventory.Guest, keys []string) engine.DockerPlan {
+	p := engine.DockerPlan{Guest: g, NeedName: g.Critical, Snap: engine.SnapPlan{Possible: true, Name: "pw-20261113-1805-docker", Reason: "décochée par défaut", Storage: "local-lvm (lvmthin) : 45 %"}}
+	det, ok := f.store.Get(g.Key())
+	if !ok {
+		p.Blockers = []string{"aucune détection"}
+		return p
+	}
+	p.Det = &det
+	for _, gr := range det.DockerInfo.Groups {
+		if len(keys) > 0 && gr.Key != keys[0] {
+			continue
+		}
+		if gr.Updatable() {
+			p.Groups = append(p.Groups, gr)
+			p.Steps = append(p.Steps, gr.Label()+" : re-déploiement")
+		} else if len(keys) > 0 {
+			p.Blockers = append(p.Blockers, gr.Label()+" : "+gr.Blocker)
+		}
+	}
+	if len(p.Groups) == 0 && len(p.Blockers) == 0 {
+		p.Blockers = []string{"aucune stack ni aucun projet compose à mettre à jour"}
+	}
+	return p
+}
+
+func (f *fakeEngine) ExecuteDocker(g inventory.Guest, keys []string, dry bool, user string, confirmed bool, name string, snapshot bool) (jobs.Job, error) {
+	f.dockerKeys = keys
+	p := f.PlanDocker(g, keys)
+	if !p.OK() {
+		return jobs.Job{}, errors.New(p.Blockers[0])
+	}
+	if !dry && !confirmed {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindDocker, t, dry, user, func(_ context.Context, _ jobs.Job, log jobs.Logger) (string, error) {
+		log(false, "▶ Portainer")
+		return "stack mise à jour", nil
+	})
+}
+
 func (f *fakeEngine) SetAnswers(key string, a map[string]string) error {
 	if f.answers == nil {
 		f.answers = map[string]map[string]string{}
@@ -271,7 +314,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(jm.Close)
 	store, _ := detect.OpenStore(dir)
-	eng := &fakeEngine{jm: jm}
+	eng := &fakeEngine{jm: jm, store: store}
 	next := time.Date(2026, 11, 15, 3, 40, 0, 0, time.Local)
 	srv, err := New(cfg, inv, Deps{Engine: eng, Jobs: jm, Detections: store, Batches: eng, NextDetection: func() time.Time { return next }}, log, "test")
 	if err != nil {
@@ -939,5 +982,92 @@ func TestVMsSpecialAndOSSupport(t *testing.T) {
 	_, rb := h.do("GET", "/invites/loki/203/redemarrage?quoi=ct", nil, nil)
 	if !strings.Contains(rb, "Redémarrer la VM") || !strings.Contains(rb, "qm reboot") {
 		t.Error("page de redémarrage d'une VM")
+	}
+}
+
+func dockerResult(at time.Time) detect.Result {
+	d := detect.Docker{Compose: "2.29.1", Checked: true, List: []detect.Container{
+		{ID: "b1", Name: "mealie", Image: "ghcr.io/mealie-recipes/mealie:v1.8.0", State: "running", Project: "mealie", WorkDir: "/data/compose/12", Check: detect.CheckUpdate, NewTag: "v1.9.0", ChangelogURL: "https://github.com/mealie-recipes/mealie/releases", Since: at},
+		{ID: "c1", Name: "beszel", Image: "henrygd/beszel:latest", State: "running", Project: "beszel", WorkDir: "/opt/beszel", Check: detect.CheckOK},
+		{ID: "d1", Name: "portainer", Image: "portainer/portainer-ce:latest", State: "running", Check: detect.CheckUpdate},
+		{ID: "e1", Name: "watchtower", Image: "containrrr/watchtower", State: "running", Check: detect.CheckOK},
+	}}
+	d.BuildGroups()
+	for i := range d.Groups {
+		switch d.Groups[i].Kind {
+		case detect.GroupPortainer:
+			d.Groups[i].Instance, d.Groups[i].EndpointID = "p1", 2
+		case detect.GroupRun:
+			d.Groups[i].Blocker = "lancé par docker run"
+		}
+	}
+	return detect.Result{At: at, Docker: true, Containers: 4, DockerInfo: d, Apt: detect.Apt{Present: true}}
+}
+
+func TestDockerUI(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", dockerResult(h.now.Add(-time.Hour)))
+
+	_, inv := h.do("GET", "/inventaire", nil, nil)
+	if !strings.Contains(inv, "2 image(s) Docker") {
+		t.Error("inventaire : badge Docker absent")
+	}
+	_, todo := h.do("GET", "/", nil, nil)
+	for _, want := range []string{">Docker<", `value="loki/104:docker"`, "1 stack ou projet : mealie", "à la main", "v1.9.0", "Watchtower démarré"} {
+		if !strings.Contains(todo, want) {
+			t.Errorf("« À traiter » sans %q", want)
+		}
+	}
+	_, fiche := h.do("GET", "/invites/loki/104", nil, nil)
+	if !strings.Contains(fiche, "Conteneurs Docker") || !strings.Contains(fiche, `href="/invites/loki/104/docker"`) || !strings.Contains(fiche, "?onglet=docker") {
+		t.Error("fiche : carte Docker absente")
+	}
+	_, tab := h.do("GET", "/invites/loki/104?onglet=docker", nil, nil)
+	for _, want := range []string{"stack Portainer « mealie »", "Portainer p1, environnement 2", "nouvelle image", "changelog ↗", `docker?groupe=portainer-12`, "lancé par docker run", "Watchtower est démarré"} {
+		if !strings.Contains(tab, want) {
+			t.Errorf("onglet Docker sans %q", want)
+		}
+	}
+	_, page := h.do("GET", "/invites/loki/104/docker?groupe=portainer-12", nil, nil)
+	if !strings.Contains(page, "re-déploiement") || !strings.Contains(page, `name="groupe" value="portainer-12"`) {
+		t.Error("page de confirmation Docker incomplète")
+	}
+	tok := h.csrf()
+	form := url.Values{"csrf": {tok}, "simulation": {"0"}, "groupe": {"portainer-12"}}
+	if resp, _ := h.do("POST", "/invites/loki/104/docker", form, nil); !strings.Contains(resp.Header.Get("Location"), "erreur=") {
+		t.Error("application sans confirmation acceptée")
+	}
+	form.Set("confirme", "1")
+	resp, _ := h.do("POST", "/invites/loki/104/docker", form, nil)
+	if !strings.HasPrefix(resp.Header.Get("Location"), "/taches/") || len(h.eng.dockerKeys) != 1 {
+		t.Errorf("mise à jour Docker : %s %v", resp.Header.Get("Location"), h.eng.dockerKeys)
+	}
+	_, lot := h.do("GET", "/lot?sel=loki/104:docker", nil, nil)
+	if !strings.Contains(lot, `value="docker" selected`) || !strings.Contains(lot, "mealie (1)") {
+		t.Error("lot Docker")
+	}
+}
+
+func TestDockerSteps(t *testing.T) {
+	j := jobs.Job{Kind: jobs.KindDocker, Target: jobs.Target{VMID: 104}, Status: jobs.Success}
+	lines := []jobs.Line{
+		{Text: "  0. pas de snapshot"},
+		{Text: "  1. stack Portainer « mealie » : re-déploiement par Portainer p1 (stack n° 12) avec téléchargement des images"},
+		{Text: "  2. projet compose « beszel » (/opt/beszel) : docker compose pull puis up -d"},
+		{Text: "▶ Portainer p1 : stack n° 12 (mealie)"},
+		{Text: "  stack re-déployée en 3s"},
+		{Text: "▶ vm-docker-compose 104 beszel 0"},
+		{Text: "▶ vm-detect 104 1"},
+		{Text: "pw.end=1"},
+	}
+	st := stepsFor(j, lines)
+	if len(st) != 3 || st[0].Label != "Stack Portainer « mealie »" || st[1].Label != "Projet compose « beszel »" {
+		t.Fatalf("étapes : %+v", st)
+	}
+	for _, s := range st {
+		if s.State != "fait" {
+			t.Errorf("étape %s : %s", s.Label, s.State)
+		}
 	}
 }

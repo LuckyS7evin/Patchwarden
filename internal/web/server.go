@@ -51,6 +51,8 @@ type Engine interface {
 	PreviewBatch(reqs []engine.BatchRequest) []string
 	StartBatch(reqs []engine.BatchRequest, dryRun, stopOnFail bool, user string) (engine.Batch, error)
 	OSSupport(r detect.Result) eol.Status
+	PlanDocker(g inventory.Guest, keys []string) engine.DockerPlan
+	ExecuteDocker(g inventory.Guest, keys []string, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
 }
 
 // Batches donne accès aux lots.
@@ -201,7 +203,7 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		return sinceLabel(s.now().Sub(t))
 	}
 	s.pages = map[string]*template.Template{}
-	for _, p := range []string{"connexion", "traiter", "inventaire", "invite", "taches", "tache", "action", "restaurer", "snapshots", "reglages", "lot", "lots", "redemarrage"} {
+	for _, p := range []string{"connexion", "traiter", "inventaire", "invite", "taches", "tache", "action", "restaurer", "snapshots", "reglages", "lot", "lots", "redemarrage", "docker"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partiels.html", "templates/"+p+".html")
 		if err != nil {
 			return nil, fmt.Errorf("gabarit %s : %w", p, err)
@@ -233,6 +235,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /lots/{id}", s.authed(s.batchPage))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/redemarrage", s.authed(s.restartPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/redemarrage", s.sameOrigin(s.authed(s.csrf(s.restartSubmit))))
+	mux.HandleFunc("GET /invites/{node}/{vmid}/docker", s.authed(s.dockerPage))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/docker", s.sameOrigin(s.authed(s.csrf(s.dockerSubmit))))
 	mux.HandleFunc("GET /snapshots", s.authed(s.snapshotsPage))
 	mux.HandleFunc("GET /reglages", s.authed(s.settingsPage))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/apercu", s.authed(s.previewFragment))
@@ -442,7 +446,7 @@ type row struct {
 
 // Pending : la dernière détection signale quelque chose à faire.
 func (r row) Pending() bool {
-	return r.Det != nil && (r.Det.Apt.Total > 0 || r.Det.AppUpdates() > 0 || r.Det.RebootRequired)
+	return r.Det != nil && (r.Det.Apt.Total > 0 || r.Det.AppUpdates() > 0 || r.Det.RebootRequired || r.Det.DockerInfo.Updates() > 0)
 }
 
 // Major : une version majeure est disponible.
@@ -673,7 +677,7 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 				if rw.Det.Apt.Security > 0 {
 					ng.Sec++
 				}
-				if rw.Det.Apt.Total > 0 || rw.Det.AppUpdates() > 0 {
+				if rw.Det.Apt.Total > 0 || rw.Det.AppUpdates() > 0 || rw.Det.DockerInfo.Updates() > 0 {
 					ng.Upd++
 				}
 			}

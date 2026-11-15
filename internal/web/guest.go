@@ -38,10 +38,14 @@ type guestData struct {
 	TopSec []detect.Package
 	// Restart : redémarrages utiles (services, CT).
 	Restart *engine.RestartPlan
+	// Docker : mise à jour des conteneurs (tous les groupes à jour possibles) et
+	// conteneurs par groupe pour l'onglet Docker.
+	Docker       *engine.DockerPlan
+	DockerGroups []dockerGroupView
 }
 
 var guestTabs = []struct{ key, label string }{
-	{"", "Aperçu"}, {"paquets", "Paquets"}, {"snapshots", "Snapshots"}, {"questions", "Questions du script"}, {"historique", "Historique"},
+	{"", "Aperçu"}, {"paquets", "Paquets"}, {"docker", "Docker"}, {"snapshots", "Snapshots"}, {"questions", "Questions du script"}, {"historique", "Historique"},
 }
 
 // guestInfo rassemble ce que la fiche et l'aperçu affichent.
@@ -84,6 +88,11 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 	}
 	rp := s.deps.Engine.PlanRestart(g)
 	d.Restart = &rp
+	if det := d.Row.Det; det != nil && det.Docker && len(det.DockerInfo.List) > 0 {
+		dp := s.deps.Engine.PlanDocker(g, nil)
+		d.Docker = &dp
+		d.DockerGroups = dockerView(det.DockerInfo)
+	}
 	d.SnapPref = s.deps.Engine.SnapPref(g.Key())
 	d.SnapDefaults = s.deps.Engine.SnapDefaults()
 	if err := s.deps.Engine.CanSnapAction(g); err != nil {
@@ -95,7 +104,7 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 			known = true
 		}
 	}
-	if !known {
+	if !known || (d.Tab == "docker" && d.DockerGroups == nil) {
 		d.Tab = ""
 	}
 	for _, t := range guestTabs {
@@ -107,6 +116,13 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 				if d.Row.Det.Apt.Security > 0 {
 					tl.BadgeClass = "c"
 				}
+			}
+		case "docker":
+			if d.DockerGroups == nil {
+				continue
+			}
+			if n := d.Row.Det.DockerInfo.Updates(); n > 0 {
+				tl.Badge, tl.BadgeClass = fmt.Sprint(n), "w"
 			}
 		case "snapshots":
 			if d.Row.Det != nil && len(d.Row.Det.Snap.PW) > 0 {

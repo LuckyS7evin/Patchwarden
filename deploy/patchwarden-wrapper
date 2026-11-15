@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 8) :
+# Verbes (version 9) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -39,14 +39,20 @@
 #                                          jamais transmise par PatchWarden ; services système
 #                                          exclus)
 #   lxc-reboot <vmid>                      redémarre le CT (pct reboot)
+#   lxc-docker-compose <vmid> <projet> <0|1>
+#                                          met à jour un projet docker compose « classique »
+#                                          (pas une stack Portainer) : pull puis up -d des
+#                                          seuls services démarrés (1 = simulation). Dossier
+#                                          et fichiers lus dans les labels des conteneurs, dans
+#                                          l'invité : PatchWarden ne transmet que le nom du projet
 #
 #   vm-detect, vm-apt, vm-snapshot, vm-snapdel, vm-rollback, vm-restart-services,
-#   vm-reboot : mêmes arguments et mêmes effets pour une VM. Les scripts y sont
+#   vm-reboot, vm-docker-compose : mêmes arguments et mêmes effets pour une VM. Les scripts y sont
 #   exécutés par l'agent invité QEMU (qm guest exec, script sur l'entrée
 #   standard) ; les opérations longues tournent en arrière-plan dans la VM et
 #   leur journal est relu toutes les 2 s.
 #
-# Snapshots : seuls ceux dont le nom suit pw-AAAAMMJJ-HHMM-(complet|securite)
+# Snapshots : seuls ceux dont le nom suit pw-AAAAMMJJ-HHMM-(complet|securite|docker)
 # sont acceptés. Les snapshots créés à la main ne sont jamais touchés.
 #
 # Codes de sortie : 0 succès, 2 requête refusée, 3 invité non démarré,
@@ -55,14 +61,17 @@
 # introuvable, 45 échec de pct delsnapshot / rollback, 46 CT non redémarré,
 # 50 échec du redémarrage d'un service, 51 systemd absent, 52 échec de pct reboot,
 # 4 agent invité injoignable (VM), 5 échec d'exécution par l'agent, 22 la mise à
-# jour supprimerait des paquets (refusée),
+# jour supprimerait des paquets (refusée), 60 docker absent, 61 docker compose v2
+# absent, 62 projet compose introuvable, 63 projet géré par Portainer, 64 dossier ou
+# fichiers du projet introuvables, 65 configuration compose invalide, 66 échec du
+# pull, 67 échec de up -d, 68 aucun service du projet démarré,
 # autre : code renvoyé par la commande exécutée dans l'invité.
 # ==============================================================================
 
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=8
+WRAPPER_VERSION=9
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -331,6 +340,18 @@ fi
 if has docker && docker info </dev/null >/dev/null 2>&1; then
 	kv docker.present 1
 	kv docker.containers "$(docker ps -aq </dev/null 2>/dev/null | wc -l)"
+	kv docker.compose "$(docker compose version --short </dev/null 2>/dev/null | head -n 1)"
+	# Un conteneur par ligne : id|nom|image|id d'image|état|projet|service|dossier|fichiers|version|source.
+	ids="$(docker ps -aq --no-trunc </dev/null 2>/dev/null | head -n 200)"
+	if [ -n "$ids" ]; then
+		# shellcheck disable=SC2086
+		docker inspect --format 'docker.ctr={{.Id}}|{{.Name}}|{{.Config.Image}}|{{.Image}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}|{{index .Config.Labels "com.docker.compose.project.config_files"}}|{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.source"}}' $ids </dev/null 2>/dev/null | tr -d '\r'
+		# Empreintes (digests) des images, telles que téléchargées du registre.
+		# shellcheck disable=SC2086
+		imgs="$(docker inspect --format '{{.Image}}' $ids </dev/null 2>/dev/null | sort -u)"
+		# shellcheck disable=SC2086
+		[ -n "$imgs" ] && docker image inspect --format 'docker.img={{.Id}}|{{join .RepoDigests ","}}' $imgs </dev/null 2>/dev/null | tr -d '\r'
+	fi
 else
 	kv docker.present 0
 fi
@@ -462,6 +483,70 @@ if [ -e /var/run/reboot-required ]; then echo "pw.reboot_required=1"; fi
 echo "pw.update_rc=$rc"
 exit "$rc"
 CSUPDATE_EOF
+
+# ------------------------------------------------------------------------------
+# Mise à jour d'un projet docker compose DANS l'invité. $1 = projet, $2 = 1 pour
+# simuler. Le dossier et les fichiers du projet sont lus dans les labels posés
+# par docker compose sur ses conteneurs. Seuls les services démarrés sont
+# concernés : un service arrêté volontairement n'est jamais relancé. Les stacks
+# Portainer (dossier /data/compose/<id>) sont refusées : elles passent par l'API
+# Portainer, sinon Portainer perdrait la trace de leur configuration.
+# ------------------------------------------------------------------------------
+read -r -d '' COMPOSEUP <<'COMPOSEUP_EOF'
+P="$1"; DRY="$2"
+export LC_ALL=C
+set -f
+if ! command -v docker >/dev/null 2>&1; then echo "PW-ERREUR: docker absent de cet invité"; exit 60; fi
+if ! docker compose version </dev/null >/dev/null 2>&1; then echo "PW-ERREUR: docker compose v2 (commande « docker compose ») absent de cet invité"; exit 61; fi
+cid="$(docker ps -aq --filter "label=com.docker.compose.project=$P" </dev/null 2>/dev/null | head -n 1)"
+if [ -z "$cid" ]; then echo "PW-ERREUR: aucun conteneur du projet compose « $P »"; exit 62; fi
+lbl() { docker inspect --format "{{index .Config.Labels \"$1\"}}" "$cid" </dev/null 2>/dev/null | tr -d '\r'; }
+wd="$(lbl com.docker.compose.project.working_dir)"
+files="$(lbl com.docker.compose.project.config_files)"
+envs="$(lbl com.docker.compose.project.environment_file)"
+case "$wd" in
+/data/compose/*) echo "PW-ERREUR: projet géré par Portainer (stack) : mise à jour par l'API Portainer uniquement"; exit 63 ;;
+/*) ;;
+*) echo "PW-ERREUR: dossier du projet inconnu (label working_dir absent)"; exit 64 ;;
+esac
+if [ ! -d "$wd" ]; then echo "PW-ERREUR: dossier du projet introuvable : $wd"; exit 64; fi
+if [ -z "$files" ]; then echo "PW-ERREUR: fichiers compose inconnus (label config_files absent)"; exit 64; fi
+set --
+oldifs="$IFS"
+IFS=','
+for f in $files; do
+	case "$f" in /*) ;; *) f="$wd/$f" ;; esac
+	if [ ! -f "$f" ]; then IFS="$oldifs"; echo "PW-ERREUR: fichier compose introuvable : $f"; exit 64; fi
+	set -- "$@" -f "$f"
+done
+for f in $envs; do
+	[ -f "$f" ] && set -- "$@" --env-file "$f"
+done
+IFS="$oldifs"
+cd "$wd" || exit 64
+echo "PW: projet $P, dossier $wd"
+echo "PW: fichiers : $files"
+if ! docker compose -p "$P" "$@" config -q </dev/null; then echo "PW-ERREUR: configuration compose invalide"; exit 65; fi
+svcs="$(docker compose -p "$P" "$@" ps --services --status running </dev/null 2>/dev/null | tr '\n' ' ')"
+stopped="$(docker compose -p "$P" "$@" ps --services --status exited </dev/null 2>/dev/null | tr '\n' ' ')"
+if [ -z "$(printf '%s' "$svcs" | tr -d ' ')" ]; then echo "PW-ERREUR: aucun service du projet n'est démarré : rien n'est mis à jour (ni relancé)"; exit 68; fi
+echo "PW: services démarrés, mis à jour : $svcs"
+[ -n "$(printf '%s' "$stopped" | tr -d ' ')" ] && echo "PW: services arrêtés, laissés tels quels : $stopped"
+echo "PW: images :"
+docker compose -p "$P" "$@" config --images </dev/null 2>/dev/null | sed 's/^/PW:   /'
+if [ "$DRY" = 1 ]; then
+	echo "PW: simulation : docker compose pull et up -d ne sont pas lancés"
+	exit 0
+fi
+echo "PW: docker compose pull"
+# shellcheck disable=SC2086
+if ! docker compose -p "$P" "$@" pull $svcs </dev/null 2>&1; then echo "PW-ERREUR: échec du téléchargement des images"; exit 66; fi
+echo "PW: docker compose up -d (seuls les conteneurs dont l'image a changé sont recréés)"
+# shellcheck disable=SC2086
+if ! docker compose -p "$P" "$@" up -d --no-deps $svcs </dev/null 2>&1; then echo "PW-ERREUR: échec de docker compose up -d"; exit 67; fi
+docker compose -p "$P" "$@" ps </dev/null 2>&1 | sed 's/^/PW:   /'
+exit 0
+COMPOSEUP_EOF
 
 # ------------------------------------------------------------------------------
 # Exécution d'un script dans l'invité (script sur l'entrée standard).
@@ -680,7 +765,7 @@ restore_resources() {
 # ------------------------------------------------------------------------------
 # Snapshots (côté nœud). Seuls les snapshots nommés par PatchWarden sont gérés.
 # ------------------------------------------------------------------------------
-PW_SNAP_RE='^pw-[0-9]{8}-[0-9]{4}-(complet|securite)$'
+PW_SNAP_RE='^pw-[0-9]{8}-[0-9]{4}-(complet|securite|docker)$'
 SNAP=""
 KEEP=1
 MAXPCT=90
@@ -721,7 +806,7 @@ snap_info() {
 		my $other = 0;
 		for my $s (sort { ($a->{snaptime} // 0) <=> ($b->{snaptime} // 0) } @$d) {
 			next if !defined $s->{name} || $s->{name} eq "current";
-			if ($s->{name} =~ /^pw-[0-9]{8}-[0-9]{4}-(complet|securite)$/) {
+			if ($s->{name} =~ /^pw-[0-9]{8}-[0-9]{4}-(complet|securite|docker)$/) {
 				my $desc = $s->{description} // "";
 				$desc =~ s/[\x00-\x1f]+/ /g;
 				printf "snap.pw=%s %d %s\n", $s->{name}, $s->{snaptime} // 0, $desc;
@@ -882,8 +967,13 @@ run_reboot() {
 	[[ "$st" == "status: running" ]] || exit 52
 }
 
+run_docker_compose() {
+	log "${VERB} ${VMID} ${ARGS[2]} simulation=${ARGS[3]}"
+	g_stream "$TIMEOUT_UPDATE" "${ARGS[2]}" "${ARGS[3]}" <<<"$COMPOSEUP"
+}
+
 # Verbes disponibles pour les VM (pas d'appli community-scripts dans une VM).
-if [[ "$GT" == vm && ! "$BASE" =~ ^(detect|apt|snapshot|snapdel|rollback|restart-services|reboot)$ ]]; then
+if [[ "$GT" == vm && ! "$BASE" =~ ^(detect|apt|snapshot|snapdel|rollback|restart-services|reboot|docker-compose)$ ]]; then
 	refuse "verbe indisponible pour une VM : ${VERB}"
 fi
 
@@ -973,6 +1063,17 @@ reboot)
 	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : ${VERB} <vmid>"
 	check_guest "${ARGS[1]}"
 	run_detached reboot run_reboot
+	;;
+docker-compose)
+	[[ ${#ARGS[@]} -eq 4 ]] || refuse "usage : ${VERB} <vmid> <projet> <0|1>"
+	[[ "${ARGS[2]}" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] || refuse "nom de projet compose invalide : ${ARGS[2]}"
+	[[ "${ARGS[3]}" =~ ^[01]$ ]] || refuse "simulation attendue : 0 ou 1"
+	check_guest "${ARGS[1]}"
+	if [[ "${ARGS[3]}" == 1 ]]; then
+		run_docker_compose
+		exit $?
+	fi
+	run_detached docker run_docker_compose
 	;;
 *)
 	refuse "verbe inconnu : ${VERB}"

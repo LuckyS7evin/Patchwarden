@@ -17,7 +17,7 @@ de mémoire, sans agent dans les invités.
 | 5 | Snapshots avant mise à jour, retour arrière en un clic | ✅ |
 | 6 | Lots, regroupement par tags, redémarrages requis | ✅ |
 | 7 | VMs (guest agent), OMV/PBS, fin de support des OS | ✅ |
-| 8 | Docker (API Portainer) | à faire |
+| 8 | Docker : stacks Portainer (API), projets docker compose, comparaison aux registres | ✅ (à recetter) |
 | 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique, métriques Prometheus | à faire |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
@@ -83,6 +83,19 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
     bibliothèque remplacée par une mise à jour (correctif inactif tant qu'ils tournent) ;
     « Redémarrer les services » (services système exclus) ou « Redémarrer le CT », depuis
     la fiche ou en lot ;
+  - **Docker** (jalon 8) : la détection liste les conteneurs de chaque LXC ou VM et compare
+    chaque image au registre (Docker Hub, ghcr.io, lscr.io, quay.io…, sans compte) :
+    « nouvelle image » quand le tag utilisé a été republié, et, pour un tag de version
+    (`v1.8.0`, `5`, `3.12-alpine`), la version plus récente publiée sous un autre tag, **jamais
+    appliquée** (lien changelog : dépôt GitHub de l'image, sinon page du registre). Mise à
+    jour par groupe, après confirmation, simulation et snapshot possibles :
+    - **stacks Portainer** : re-déploiement par l'API Portainer avec téléchargement des
+      images, même fichier, mêmes variables, sans suppression (section `[[portainer]]`) ;
+    - **projets docker compose** classiques : `docker compose pull` puis `up -d` des seuls
+      services démarrés, par le wrapper (dossier lu dans l'invité, jamais transmis) ;
+    - conteneurs lancés par `docker run`, Portainer lui-même et son agent : détection
+      seulement (à mettre à jour à la main) ; Watchtower démarré : signalé ;
+    onglet Docker sur la fiche, groupe Docker dans « À traiter », opération Docker dans les lots ;
   - **Snapshots** (tous les snapshots PatchWarden), **Réglages** (configuration en lecture
     seule, sans secret) ;
   - menu latéral avec l'état des nœuds (CPU, RAM, stockage des invités le plus rempli) ;
@@ -299,6 +312,35 @@ automatique est affichée en haut de l'inventaire.
 La première détection planifiée signale tous les correctifs déjà en attente (ils sont
 nouveaux pour PatchWarden) ; les suivantes ne signalent que ce qui est apparu depuis.
 
+### 8. Docker et Portainer (facultatif)
+
+La comparaison aux registres est active par défaut (`[docker] registry_check`) : PatchWarden
+doit pouvoir joindre `registry-1.docker.io`, `auth.docker.io`, `ghcr.io`, `quay.io`… en HTTPS.
+Les stacks Portainer ne sont mises à jour que si leur instance est déclarée :
+
+1. Dans Portainer : créez un utilisateur `patchwarden` (Paramètres → Utilisateurs), donnez-lui
+   accès aux environnements concernés et la propriété des stacks à mettre à jour (ou faites-en
+   un administrateur : Portainer CE n'a pas de rôle plus fin), puis, connecté avec lui,
+   **Mon compte → Jetons d'accès → Ajouter**. Une instance Portainer par section.
+2. Dans `patchwarden.env` : `PATCHWARDEN_PORTAINER_DOCKER=ptr_…`
+3. Dans `config.toml` :
+
+```toml
+[[portainer]]
+name = "docker"                          # nom libre, affiché dans l'interface
+url = "https://192.168.0.50:9443"        # sans /api
+token_env = "PATCHWARDEN_PORTAINER_DOCKER"
+fingerprint = "AA:BB:…"                  # certificat auto-signé de Portainer (ou ca_file)
+```
+
+L'empreinte s'obtient avec `openssl s_client -connect 192.168.0.50:9443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256`.
+`patchwarden check-config` teste chaque instance (environnements, stacks visibles). Chaque
+invité est rattaché tout seul à son environnement Portainer (conteneurs en commun) : rien à
+déclarer par invité, rien à changer après un changement d'adresse IP des invités.
+
+**Arrêtez Watchtower** s'il tourne : il met les images à jour de son côté, et PatchWarden
+verrait alors tout « à jour ».
+
 ### Mettre à jour PatchWarden
 
 Dans le LXC où le dépôt est cloné et compilé :
@@ -328,26 +370,32 @@ le wrapper est trop ancien.
 | Jeton API `patchwarden@pve!inventaire` | Inventaire, état des nœuds et des stockages (`/cluster/resources`) | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
 | Clé SSH vers root des nœuds, **commande forcée** | Verbes du wrapper | Une seule commande possible (le wrapper), depuis la seule IP de PatchWarden, `restrict` : ni terminal, ni redirection de ports, ni agent | Jalon 2 |
 | Jeton GitHub (facultatif) | Dernières versions des applis | Aucun droit : lecture des dépôts publics | Jalon 2 |
+| Registres d'images | Empreinte actuelle d'un tag, liste des tags | Aucun compte : jeton anonyme en lecture, dépôts publics seulement | Jalon 8 |
+| Jeton d'accès Portainer (facultatif) | Liste des environnements, conteneurs et stacks ; re-déploiement d'une stack | Ceux de l'utilisateur Portainer du jeton : accès aux environnements concernés et aux stacks à mettre à jour. PatchWarden n'appelle que `GET /endpoints`, `GET /endpoints/{id}/docker/containers/json`, `GET /stacks`, `GET /stacks/{id}`, `GET /stacks/{id}/file`, `PUT /stacks/{id}` et `PUT /stacks/{id}/git/redeploy` | Jalon 8 |
 
 Le wrapper n'accepte qu'un vocabulaire fixe ; tout le reste est refusé (code 2) et journalisé.
 Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. PatchWarden
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v8) | Effet |
+| Verbe (wrapper v9) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
 | `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
 | `lxc-apt <vmid> <security\|full> <0\|1>` | `apt-get update` puis `apt-get --with-new-pkgs upgrade` (dépôts `*-security` seuls en mode `security`). `1` = simulation (`apt-get -s`), rien n'est modifié |
 | `lxc-cs-update <vmid> <réponses> <cpu> <ram>` | Commande `update` community-scripts sans terminal (`PHS_SILENT=1`), réponses aux questions sur l'entrée standard. Si le CT a moins que `cpu`/`ram` (exigés par le script) : `pct set` temporaire, attente que le CT voie les nouvelles valeurs (les CPU sont appliqués par `pvestatd`, jusqu'à 10 s), puis restauration des valeurs d'origine |
-| `lxc-snapshot <vmid> <nom> <garder> <seuil> <0\|1> <description>` | `pct snapshot` (nom `pw-AAAAMMJJ-HHMM-action` exigé), après vérification du stockage (`pvesh …/feature`, `pvesm status`) ; puis `pct delsnapshot` des snapshots PatchWarden au-delà de `garder`. `1` = vérification seule |
+| `lxc-snapshot <vmid> <nom> <garder> <seuil> <0\|1> <description>` | `pct snapshot` (nom `pw-AAAAMMJJ-HHMM-(complet\|securite\|docker)` exigé), après vérification du stockage (`pvesh …/feature`, `pvesm status`) ; puis `pct delsnapshot` des snapshots PatchWarden au-delà de `garder`. `1` = vérification seule |
 | `lxc-snapdel <vmid> <nom>` | `pct delsnapshot` d'un snapshot PatchWarden (`pw-…`) uniquement |
 | `lxc-rollback <vmid> <nom>` | `pct rollback` vers un snapshot PatchWarden (`pw-…`) uniquement, puis `pct start` si le CT tournait |
 | `lxc-restart-services <vmid>` | Dans le CT : `systemctl restart` des services encore liés à une bibliothèque remplacée (liste établie dans le CT, jamais transmise par PatchWarden ; dbus, `systemd-*`, sessions et consoles exclus) |
 | `lxc-reboot <vmid>` | `pct reboot` du CT, puis attente qu'il soit de nouveau démarré |
-| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
+| `lxc-docker-compose <vmid> <projet> <0\|1>` | Dans l'invité : retrouve le dossier et les fichiers du projet compose dans les labels de ses conteneurs (rien n'est transmis par PatchWarden), refuse une stack Portainer, puis `docker compose pull` et `up -d --no-deps` des seuls services démarrés. `1` = simulation (`docker compose config`) |
+| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
 | Modes de `*-apt` | `security`, `full`, et pour les produits particuliers `dist` (PBS : `apt-get dist-upgrade`) et `omv` (OpenMediaVault : `omv-upgrade`) ; ces deux modes refusent toute mise à jour qui supprimerait un paquet (code 22) |
+
+La détection lit aussi la liste des conteneurs (`docker ps`, `docker inspect`, `docker image
+inspect`, `docker compose version`) : lecture seule.
 
 Le wrapper refuse de lui-même tout snapshot dont le nom n'est pas `pw-…` : même une instance
 PatchWarden compromise ne pourrait ni supprimer ni restaurer vos snapshots manuels. Il lit

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -17,7 +18,12 @@ type stepView struct {
 	State         string // "", "encours", "fait", "echec"
 }
 
-var snapLineRe = regexp.MustCompile(`▶ lxc-snapshot \d+ (pw-[0-9]{8}-[0-9]{4}-[a-z]+)`)
+var snapLineRe = regexp.MustCompile(`▶ (?:lxc|vm)-snapshot \d+ (pw-[0-9]{8}-[0-9]{4}-[a-z]+)`)
+
+var (
+	stackStepRe   = regexp.MustCompile(`^\d+\. (stack Portainer « [^»]+ ») : .*\(stack n° (\d+)\)`)
+	composeStepRe = regexp.MustCompile(`^\d+\. (projet compose « ([^»]+) »)`)
+)
 
 func planLine(lines []jobs.Line, contains string) string {
 	for _, l := range lines {
@@ -70,6 +76,38 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 		if !j.DryRun {
 			steps = append(steps, stepView{Label: "Vérification", Detail: "détection après la mise à jour", Start: "▶ lxc-detect", Done: "pw.end=1"})
 		}
+	case jobs.KindDocker:
+		if anyLine(lines, "0. snapshot avant") {
+			d := "avant toute modification ; annule tout s'il échoue"
+			for _, l := range lines {
+				if m := snapLineRe.FindStringSubmatch(l.Text); m != nil {
+					d = m[1]
+				}
+			}
+			if j.DryRun {
+				d = "vérification seulement"
+			}
+			steps = append(steps, stepView{Label: "Snapshot", Detail: d, Start: "▶ lxc-snapshot", Done: "snap.info=1| possible"})
+		}
+		for _, l := range lines {
+			t := strings.TrimSpace(l.Text)
+			if m := stackStepRe.FindStringSubmatch(t); m != nil {
+				d := "re-déploiement par Portainer, téléchargement des images"
+				if j.DryRun {
+					d = "stack relue, aucun re-déploiement"
+				}
+				steps = append(steps, stepView{Label: upperFirst(m[1]), Detail: d, Start: "stack n° " + m[2] + " (", Done: "stack re-déployée|re-déploiement non lancé"})
+			} else if m := composeStepRe.FindStringSubmatch(t); m != nil {
+				d := "docker compose pull puis up -d"
+				if j.DryRun {
+					d = "docker compose config, sans pull ni up"
+				}
+				steps = append(steps, stepView{Label: upperFirst(m[1]), Detail: d, Start: fmt.Sprintf("-docker-compose %d %s ", j.Target.VMID, m[2])})
+			}
+		}
+		if !j.DryRun {
+			steps = append(steps, stepView{Label: "Vérification", Detail: "détection après la mise à jour", Start: "▶ lxc-detect", Done: "pw.end=1"})
+		}
 	case jobs.KindRollback:
 		steps = append(steps,
 			stepView{Label: "Retour au snapshot", Detail: "CT arrêté puis restauré (pct rollback)", Start: "▶ lxc-rollback", Done: "terminé"},
@@ -106,7 +144,17 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 	return steps
 }
 
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
+}
+
 func hasAny(text, markers string) bool {
+	// Les marqueurs sont écrits pour les CT : une VM a les mêmes verbes en vm-.
+	text = strings.Replace(text, "▶ vm-", "▶ lxc-", 1)
 	for _, m := range strings.Split(markers, "|") {
 		if m != "" && strings.Contains(text, m) {
 			return true

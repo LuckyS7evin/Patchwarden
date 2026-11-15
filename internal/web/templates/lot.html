@@ -29,7 +29,7 @@
         </select>
       </td>
       <td class="small">{{if .Why}}<span class="crit">ignoré : {{.Why}}</span>{{else}}{{.Detail}}{{end}}</td>
-      <td>{{if .Op.Update}}{{if .SnapPossible}}<label class="small"><input type="checkbox" name="snap_{{.Index}}" value="1"{{if .Snapshot}} checked{{end}}> snapshot</label>{{else}}<span class="muted small" title="{{.SnapWhy}}">impossible</span>{{end}}{{else}}<span class="muted small">—</span>{{end}}</td>
+      <td>{{if .Op.Snapshotable}}{{if .SnapPossible}}<label class="small"><input type="checkbox" name="snap_{{.Index}}" value="1"{{if .Snapshot}} checked{{end}}> snapshot</label>{{else}}<span class="muted small" title="{{.SnapWhy}}">impossible</span>{{end}}{{else}}<span class="muted small">—</span>{{end}}</td>
     </tr>
     {{end}}
     </tbody>
@@ -42,7 +42,7 @@
     <div class="launch spaced">
       <div class="launch-box">
         <h3>1. Simuler</h3>
-        <p class="muted small">Chaque mise à jour en simulation (<code>apt-get -s</code>, snapshot vérifié seulement). Les redémarrages n'ont pas de simulation : ils sont ignorés. Rien n'est modifié.</p>
+        <p class="muted small">Chaque mise à jour en simulation (<code>apt-get -s</code>, stacks et projets Docker relus sans pull ni re-déploiement, snapshot vérifié seulement). Les redémarrages n'ont pas de simulation : ils sont ignorés. Rien n'est modifié.</p>
         <button type="submit" name="mode" value="simulation" class="btn sec2" formnovalidate>Simuler le lot</button>
       </div>
       <div class="launch-box apply">

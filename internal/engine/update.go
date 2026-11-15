@@ -38,8 +38,11 @@ func ParseAction(s string) (Action, error) {
 
 // Kind renvoie le type de tâche correspondant.
 func (a Action) Kind() jobs.Kind {
-	if a == ActSecurity {
+	switch a {
+	case ActSecurity:
 		return jobs.KindSecurity
+	case ActDocker:
+		return jobs.KindDocker
 	}
 	return jobs.KindFull
 }

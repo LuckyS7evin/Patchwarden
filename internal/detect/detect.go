@@ -130,6 +130,8 @@ type Result struct {
 	// Special : produit particulier installé dans l'invité (pve, pbs, omv) et sa version.
 	Special        string `json:"special,omitempty"`
 	SpecialVersion string `json:"special_version,omitempty"`
+	// DockerInfo : conteneurs, groupes de mise à jour et comparaison aux registres.
+	DockerInfo Docker `json:"docker_info,omitempty"`
 }
 
 // SpecialLabel renvoie le nom lisible du produit particulier.
@@ -163,6 +165,7 @@ var ErrIncomplete = errors.New("sortie de détection incomplète (marqueurs pw.d
 func Parse(lines []string) (Result, error) {
 	r := Result{Apt: Apt{IndexAgeHours: -1}}
 	var begin, end bool
+	images := map[string][]string{}
 	for _, l := range lines {
 		k, v, ok := strings.Cut(l, "=")
 		if !ok {
@@ -237,12 +240,19 @@ func Parse(lines []string) (Result, error) {
 			r.Docker = v == "1"
 		case "docker.containers":
 			r.Containers = atoi(v)
+		case "docker.compose", "docker.ctr", "docker.img":
+			r.DockerInfo.parseLine(k, v, images)
 		}
 	}
 	if !begin || !end {
 		return r, ErrIncomplete
 	}
 	r.Apt.reconcileSecurity()
+	for i := range r.DockerInfo.List {
+		c := &r.DockerInfo.List[i]
+		c.Digests = images[c.ImageID]
+	}
+	r.DockerInfo.BuildGroups()
 	r.Snap, _ = ParseSnap(lines)
 	return r, nil
 }
@@ -434,6 +444,7 @@ func carrySince(prev Result, r *Result) {
 			p.Since = r.At
 		}
 	}
+	carryDockerSince(prev.DockerInfo, &r.DockerInfo, r.At)
 	ap := map[string]time.Time{}
 	for _, a := range prev.Apps {
 		if !a.Since.IsZero() {

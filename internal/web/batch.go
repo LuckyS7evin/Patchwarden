@@ -41,6 +41,9 @@ func opChoices(op engine.Op) []engine.Op {
 	if op.Update() {
 		return []engine.Op{engine.OpSecurity, engine.OpFull}
 	}
+	if op == engine.OpDocker {
+		return []engine.Op{engine.OpDocker}
+	}
 	return []engine.Op{engine.OpServices, engine.OpReboot}
 }
 
@@ -78,6 +81,10 @@ func (s *Server) opDetail(rw row, op engine.Op) string {
 		}
 	case engine.OpServices:
 		parts = append(parts, strings.Join(d.RestartableUnits(), ", "))
+	case engine.OpDocker:
+		for _, g := range d.DockerInfo.UpdatableGroups() {
+			parts = append(parts, fmt.Sprintf("%s (%d)", g.Name, g.Updates))
+		}
 	case engine.OpReboot:
 		if d.RebootRequired {
 			parts = append(parts, "redémarrage requis")
@@ -146,6 +153,9 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 		if reqs[i].Op.Update() {
 			p := s.deps.Engine.PlanFor(reqs[i].Guest, engine.Action(reqs[i].Op))
 			reqs[i].Snapshot = p.Snap.Checked && p.Snap.Possible
+		} else if reqs[i].Op == engine.OpDocker {
+			p := s.deps.Engine.PlanDocker(reqs[i].Guest, nil)
+			reqs[i].Snapshot = p.Snap.Checked && p.Snap.Possible
 		}
 	}
 	why := s.deps.Engine.PreviewBatch(reqs)
@@ -154,6 +164,9 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 		lr := lotRow{Index: i, Row: rw, Op: rq.Op, Ops: opChoices(rq.Op), Snapshot: rq.Snapshot, Why: why[i], Detail: s.opDetail(rw, rq.Op)}
 		if rq.Op.Update() {
 			p := s.deps.Engine.PlanFor(rq.Guest, engine.Action(rq.Op))
+			lr.SnapPossible, lr.SnapWhy = p.Snap.Possible, p.Snap.Why
+		} else if rq.Op == engine.OpDocker {
+			p := s.deps.Engine.PlanDocker(rq.Guest, nil)
 			lr.SnapPossible, lr.SnapWhy = p.Snap.Possible, p.Snap.Why
 		}
 		if lr.Why == "" {

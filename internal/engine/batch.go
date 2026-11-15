@@ -28,12 +28,14 @@ const (
 	OpFull     Op = "complet"
 	OpServices Op = "services"
 	OpReboot   Op = "redemarrage"
+	// OpDocker : mise à jour des stacks et projets compose qui ont une nouvelle image.
+	OpDocker Op = "docker"
 )
 
 // ParseOp valide une opération venue de l'interface.
 func ParseOp(s string) (Op, error) {
 	switch Op(s) {
-	case OpSecurity, OpFull, OpServices, OpReboot:
+	case OpSecurity, OpFull, OpServices, OpReboot, OpDocker:
 		return Op(s), nil
 	}
 	return "", fmt.Errorf("opération inconnue : %q", s)
@@ -50,12 +52,17 @@ func (o Op) Label() string {
 		return "redémarrer les services"
 	case OpReboot:
 		return "redémarrer l'invité"
+	case OpDocker:
+		return "conteneurs Docker"
 	}
 	return string(o)
 }
 
 // Update dit si l'opération est une mise à jour (snapshot possible).
 func (o Op) Update() bool { return o == OpSecurity || o == OpFull }
+
+// Snapshotable dit si l'opération accepte un snapshot avant (et une simulation).
+func (o Op) Snapshotable() bool { return o.Update() || o == OpDocker }
 
 // États d'un élément de lot.
 const (
@@ -282,6 +289,14 @@ func (e *Engine) checkOp(r BatchRequest) string {
 		if p := e.PlanRestart(g); !p.CanReboot() {
 			return p.Why
 		}
+	case OpDocker:
+		p := e.PlanDocker(g, nil)
+		if !p.OK() {
+			return p.Blockers[0]
+		}
+		if r.Snapshot && !p.Snap.Possible {
+			return "snapshot impossible : " + p.Snap.Why
+		}
 	}
 	return ""
 }
@@ -315,11 +330,11 @@ func (e *Engine) StartBatch(reqs []BatchRequest, dryRun, stopOnFail bool, user s
 	guests := map[int]inventory.Guest{}
 	runnable := 0
 	for _, r := range reqs {
-		it := BatchItem{Node: r.Guest.Node, VMID: r.Guest.VMID, Name: r.Guest.Name, Op: r.Op, Snapshot: r.Snapshot && r.Op.Update(), Status: ItemPending}
+		it := BatchItem{Node: r.Guest.Node, VMID: r.Guest.VMID, Name: r.Guest.Name, Op: r.Op, Snapshot: r.Snapshot && r.Op.Snapshotable(), Status: ItemPending}
 		switch {
 		case seen[opKind(it)]:
 			it.Status, it.Error = ItemSkipped, "invité déjà présent dans ce lot pour ce type d'opération"
-		case dryRun && !r.Op.Update():
+		case dryRun && !r.Op.Snapshotable():
 			it.Status, it.Error = ItemSkipped, "les redémarrages n'ont pas de simulation"
 		default:
 			if why := e.checkOp(r); why != "" {
@@ -366,6 +381,8 @@ func (e *Engine) submitOp(g inventory.Guest, it BatchItem, dryRun bool, user str
 		return e.RestartServices(g, user, true)
 	case OpReboot:
 		return e.Reboot(g, user, true, g.Name)
+	case OpDocker:
+		return e.ExecuteDocker(g, nil, dryRun, user, true, g.Name, it.Snapshot)
 	}
 	return jobs.Job{}, fmt.Errorf("opération inconnue : %s", it.Op)
 }

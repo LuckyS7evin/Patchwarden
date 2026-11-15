@@ -38,21 +38,46 @@ func (d Duration) MarshalText() ([]byte, error) { return []byte(d.String()), nil
 
 // Config est la configuration complète.
 type Config struct {
-	Server    Server     `toml:"server"`
-	Auth      Auth       `toml:"auth"`
-	Proxmox   []Endpoint `toml:"proxmox"`
-	Policy    Policy     `toml:"policy"`
-	Inventory Inventory  `toml:"inventory"`
-	SSH       SSH        `toml:"ssh"`
-	Jobs      Jobs       `toml:"jobs"`
-	Detection Detection  `toml:"detection"`
-	CS        CS         `toml:"community_scripts"`
-	Upstream  Upstream   `toml:"upstream"`
-	Schedule  Schedule   `toml:"schedule"`
-	UI        UI         `toml:"ui"`
-	Snapshots Snapshots  `toml:"snapshots"`
-	EOL       EOL        `toml:"eol"`
-	Notify    []Notify   `toml:"notify"`
+	Server    Server      `toml:"server"`
+	Auth      Auth        `toml:"auth"`
+	Proxmox   []Endpoint  `toml:"proxmox"`
+	Policy    Policy      `toml:"policy"`
+	Inventory Inventory   `toml:"inventory"`
+	SSH       SSH         `toml:"ssh"`
+	Jobs      Jobs        `toml:"jobs"`
+	Detection Detection   `toml:"detection"`
+	CS        CS          `toml:"community_scripts"`
+	Upstream  Upstream    `toml:"upstream"`
+	Schedule  Schedule    `toml:"schedule"`
+	UI        UI          `toml:"ui"`
+	Snapshots Snapshots   `toml:"snapshots"`
+	EOL       EOL         `toml:"eol"`
+	Docker    Docker      `toml:"docker"`
+	Portainer []Portainer `toml:"portainer"`
+	Notify    []Notify    `toml:"notify"`
+}
+
+// Docker règle le suivi des conteneurs.
+type Docker struct {
+	// RegistryCheck : comparer les images aux registres (empreinte du tag,
+	// versions plus récentes). Défaut : true.
+	RegistryCheck *bool `toml:"registry_check"`
+	// CacheTTL : durée de validité des réponses des registres. Défaut : 6h.
+	CacheTTL Duration `toml:"cache_ttl"`
+}
+
+// Portainer est une instance Portainer : ses stacks sont mises à jour par
+// son API (re-déploiement avec téléchargement des images). Les invités sont
+// associés automatiquement à leur environnement Portainer (conteneurs communs).
+type Portainer struct {
+	Name     string `toml:"name"`
+	URL      string `toml:"url"`
+	Token    string `toml:"token"`
+	TokenEnv string `toml:"token_env"`
+	// Fingerprint (empreinte SHA-256 du certificat) ou CAFile pour un
+	// certificat auto-signé ; vides : autorités du système.
+	Fingerprint string `toml:"fingerprint"`
+	CAFile      string `toml:"ca_file"`
 }
 
 // EOL règle la fin de support des systèmes. La table intégrée est rafraîchie
@@ -316,6 +341,13 @@ func (c *Config) applyDefaults() {
 	if c.UI.IconBase == "" {
 		c.UI.IconBase = "https://cdn.jsdelivr.net/gh/selfhst/icons/webp"
 	}
+	if c.Docker.RegistryCheck == nil {
+		t := true
+		c.Docker.RegistryCheck = &t
+	}
+	if c.Docker.CacheTTL.Duration == 0 {
+		c.Docker.CacheTTL.Duration = 6 * time.Hour
+	}
 	if c.Upstream.GitHubAPI == "" {
 		c.Upstream.GitHubAPI = "https://api.github.com"
 	}
@@ -350,6 +382,19 @@ func (c *Config) resolveSecrets(getenv func(string) string) error {
 		n.Token = getenv(n.TokenEnv)
 		if n.Token == "" {
 			return fmt.Errorf("notify n° %d : la variable d'environnement %s est vide ou absente", i+1, n.TokenEnv)
+		}
+	}
+	for i := range c.Portainer {
+		p := &c.Portainer[i]
+		if p.TokenEnv == "" {
+			continue
+		}
+		if p.Token != "" {
+			return fmt.Errorf("portainer %q : token et token_env sont exclusifs", p.Name)
+		}
+		p.Token = getenv(p.TokenEnv)
+		if p.Token == "" {
+			return fmt.Errorf("portainer %q : la variable d'environnement %s est vide ou absente", p.Name, p.TokenEnv)
 		}
 	}
 	if c.Upstream.GitHubTokenEnv != "" {
@@ -467,6 +512,43 @@ func (c *Config) Validate() error {
 				add("notify n° %d : événement inconnu %q (securite, applis, echec, succes)", i+1, e)
 			}
 		}
+	}
+	seenP := map[string]bool{}
+	for i, p := range c.Portainer {
+		label := p.Name
+		if label == "" {
+			label = fmt.Sprintf("n° %d", i+1)
+		}
+		if !nameRe.MatchString(p.Name) {
+			add("portainer %s : name doit être court, en minuscules, chiffres et tirets", label)
+		}
+		if seenP[p.Name] {
+			add("portainer %s : nom en double", label)
+		}
+		seenP[p.Name] = true
+		u, err := url.Parse(p.URL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || (u.Path != "" && u.Path != "/") {
+			add("portainer %s : url attendue de la forme https://hôte:9443 (sans /api)", label)
+		}
+		if p.Token == "" {
+			add("portainer %s : token_env (ou token) est obligatoire : jeton d'accès Portainer (Mon compte → Jetons d'accès)", label)
+		}
+		if p.Fingerprint != "" && p.CAFile != "" {
+			add("portainer %s : fingerprint et ca_file sont exclusifs", label)
+		}
+		if p.Fingerprint != "" {
+			if _, err := ParseFingerprint(p.Fingerprint); err != nil {
+				add("portainer %s : %v", label, err)
+			}
+		}
+		if p.CAFile != "" {
+			if _, err := os.Stat(p.CAFile); err != nil {
+				add("portainer %s : ca_file illisible : %v", label, err)
+			}
+		}
+	}
+	if c.Docker.CacheTTL.Duration < time.Minute {
+		add("docker.cache_ttl doit valoir au moins 1m")
 	}
 	if c.Policy.SelfGuest != "" && !selfRe.MatchString(c.Policy.SelfGuest) {
 		add("policy.self_guest : format « nœud/vmid » attendu (ex. loki/103), obtenu %q", c.Policy.SelfGuest)

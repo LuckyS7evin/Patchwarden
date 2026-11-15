@@ -74,6 +74,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 	major := todoGroup{Key: "majeures", Title: "Versions majeures", Why: "lisez le changelog ; snapshot pré-coché"}
 	apps := todoGroup{Key: "applis", Title: "Applications"}
 	apt := todoGroup{Key: "paquets", Title: "Autres paquets", Why: "mises à jour apt sans correctif de sécurité"}
+	dock := todoGroup{Key: "docker", Title: "Docker", Why: "nouvelles images publiées pour les tags utilisés"}
 	restart := todoGroup{Key: "redemarrages", Title: "Redémarrages", Why: "processus qui utilisent encore les anciennes bibliothèques"}
 	maint := todoGroup{Key: "entretien", Title: "Entretien"}
 
@@ -155,6 +156,20 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			}
 			apt.Items = append(apt.Items, it)
 		}
+		if dockerTodo(&dock, g, det, icon, sel(engine.OpDocker)) {
+			pending = true
+		}
+		for _, c := range det.DockerInfo.List {
+			if c.NewTag == "" {
+				continue
+			}
+			t.Versions++
+			a := detect.App{Name: c.Name, Installed: c.Tag(), Latest: c.NewTag, ChangelogURL: c.ChangelogURL}
+			dock.Items = append(dock.Items, todoItem{Guest: g, Icon: icon, App: &a, Tag: "autre tag", TagClass: "v", Link: guestLink(g, "docker")})
+		}
+		for _, w := range det.DockerInfo.Watchtower {
+			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: "Watchtower démarré : il met les images à jour en parallèle, arrêtez-le", Code: w, Tag: "Watchtower", TagClass: "w", Link: guestLink(g, "docker")})
+		}
 		if units := det.RestartableUnits(); len(units) > 0 {
 			pending = true
 			shown := units
@@ -201,7 +216,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			return a.Before(b)
 		})
 	}
-	for _, grp := range []*todoGroup{&sec, &major, &apps, &apt, &restart, &maint} {
+	for _, grp := range []*todoGroup{&sec, &major, &apps, &dock, &apt, &restart, &maint} {
 		bySince(grp.Items)
 		if len(grp.Items) > 0 {
 			t.Groups = append(t.Groups, *grp)
@@ -209,6 +224,48 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 		}
 	}
 	return t
+}
+
+// dockerTodo ajoute les conteneurs à mettre à jour d'un invité : une ligne
+// pour ce que PatchWarden sait faire (sélectionnable), une par groupe à
+// traiter à la main.
+func dockerTodo(grp *todoGroup, g inventory.Guest, det detect.Result, icon, sel string) bool {
+	d := det.DockerInfo
+	var names []string
+	var since time.Time
+	n := 0
+	found := false
+	for _, gr := range d.Groups {
+		if gr.Updates == 0 {
+			continue
+		}
+		found = true
+		var imgs []string
+		first := time.Time{}
+		for _, cn := range gr.Containers {
+			c, _ := d.Container(cn)
+			if c.Running() && c.UpdateAvailable() {
+				imgs = append(imgs, c.Name)
+				if !c.Since.IsZero() && (first.IsZero() || c.Since.Before(first)) {
+					first = c.Since
+				}
+			}
+		}
+		if !gr.Updatable() {
+			grp.Items = append(grp.Items, todoItem{Guest: g, Icon: icon, Text: gr.Label() + " : " + gr.Blocker, Code: strings.Join(imgs, ", "), Tag: "à la main", Since: first, Link: guestLink(g, "docker")})
+			continue
+		}
+		n += gr.Updates
+		names = append(names, gr.Name)
+		if !first.IsZero() && (since.IsZero() || first.Before(since)) {
+			since = first
+		}
+	}
+	if n > 0 {
+		grp.Items = append(grp.Items, todoItem{Guest: g, Icon: icon, Sel: sel, Text: plural(len(names), "stack ou projet", "stacks ou projets") + " : " + strings.Join(names, ", "),
+			Tag: plural(n, "image", "images"), TagClass: "w", Since: since, Link: guestLink(g, "docker")})
+	}
+	return found
 }
 
 func plural(n int, one, many string) string {

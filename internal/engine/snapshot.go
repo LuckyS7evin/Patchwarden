@@ -47,7 +47,7 @@ type SnapPlan struct {
 	Removed []string
 }
 
-var pwSnapRe = regexp.MustCompile(`^pw-[0-9]{8}-[0-9]{4}-(complet|securite)$`)
+var pwSnapRe = regexp.MustCompile(`^pw-[0-9]{8}-[0-9]{4}-(complet|securite|docker)$`)
 
 // ValidSnapName dit si un nom est celui d'un snapshot PatchWarden.
 func ValidSnapName(n string) bool { return pwSnapRe.MatchString(n) }
@@ -140,7 +140,7 @@ func (e *Engine) planSnapshot(p *Plan, det detect.Result) {
 // snapDescription compose la description du snapshot (300 octets au plus).
 func snapDescription(p Plan, user string, at time.Time) string {
 	d := fmt.Sprintf("PatchWarden avant « %s » le %s par %s", p.Action.Label(), at.Local().Format("02/01/2006 15:04"), user)
-	if p.Det != nil {
+	if p.Det != nil && p.Action != ActDocker {
 		if p.Action == ActSecurity {
 			d += fmt.Sprintf(" ; apt : %d paquet(s) de sécurité", p.Det.Apt.SecurityStrict)
 		} else {

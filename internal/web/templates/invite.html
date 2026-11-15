@@ -88,6 +88,18 @@
     </div>
   </section>
   {{end}}{{end}}
+  {{with .Docker}}{{if or .OK $.Row.Det.DockerInfo.Updates}}
+  <section class="card">
+    <h2>Conteneurs Docker</h2>
+    {{if .OK}}
+      {{range $i, $s := .Steps}}<div class="step"><span class="n">{{inc $i}}</span><div>{{$s}}</div></div>{{end}}
+      {{range .Warnings}}<p class="alert alert-warn">{{.}}</p>{{end}}
+      <p><a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker">Mettre à jour les conteneurs…</a> <a href="?onglet=docker">détail par stack</a></p>
+    {{else}}
+      <p class="muted">{{$.Row.Det.DockerInfo.Updates}} conteneur(s) avec une nouvelle image, mais : {{index .Blockers 0}}. <a href="?onglet=docker">Détail par stack</a></p>
+    {{end}}
+  </section>
+  {{end}}{{end}}
   {{if not .Full}}<section class="card"><h2>Mises à jour</h2><p class="muted">{{if .Row.Why}}Indisponibles : {{.Row.Why}}{{else}}Indisponibles pour cet invité.{{end}}</p></section>{{end}}
   {{if gt .Missing 0}}<p class="alert alert-warn">Le script pose des questions sans terminal : <a href="?onglet=questions">enregistrez une réponse pour chacune</a> avant de mettre à jour l'application.</p>{{end}}
   </div>
@@ -116,7 +128,7 @@
         {{if .CS.NeedCPU}}<dt>Exigé par le script</dt><dd>{{.CS.NeedCPU}} CPU · {{.CS.NeedRAMMB}} Mo{{if or (lt .Nproc .CS.NeedCPU) (lt .MemMB .CS.NeedRAMMB)}} <span class="b w">augmentation temporaire</span>{{end}}</dd>{{end}}
         {{if .CS.OSOnly}}<dt>Portée</dt><dd>OS seulement (apt)</dd>{{end}}
         {{end}}
-        {{if .Docker}}<dt>Docker</dt><dd>{{.Containers}} conteneur(s) — suivi détaillé dans un prochain jalon</dd>{{end}}
+        {{if .Docker}}<dt>Docker</dt><dd>{{.Containers}} conteneur(s){{with .DockerInfo.Compose}} · compose {{.}}{{end}}{{if .DockerInfo.Updates}} · <a href="?onglet=docker"><span class="b w">{{.DockerInfo.Updates}} image(s) à mettre à jour</span></a>{{else if .DockerInfo.List}} · <a href="?onglet=docker">détail</a>{{end}}</dd>{{end}}
         {{range .Snap.Storages}}<dt>Stockage</dt><dd>{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{pct .UsedPct}} %{{end}}</dd>{{end}}
       </dl>
     </section>
@@ -152,6 +164,51 @@
 </section>
 {{else}}<p class="muted">apt absent de cet invité.</p>{{end}}
 {{else}}<p class="muted">Aucune détection pour cet invité.</p>{{end}}
+
+{{else if eq .Tab "docker"}}
+{{with .Row.Det}}
+<section class="card">
+  <h2>Conteneurs Docker</h2>
+  <p>{{len .DockerInfo.List}} conteneur(s){{with .DockerInfo.Compose}} · docker compose {{.}}{{else}} · <span class="b w">docker compose v2 absent</span>{{end}}
+    {{if .DockerInfo.Updates}} · <b>{{.DockerInfo.Updates}}</b> nouvelle(s) image(s){{end}}{{if .DockerInfo.Newer}} · {{.DockerInfo.Newer}} version(s) plus récente(s) sous un autre tag{{end}}</p>
+  {{if not .DockerInfo.Checked}}<p class="alert alert-warn">Images non comparées aux registres : relancez une détection ([docker] registry_check, wrapper v9).</p>{{end}}
+  {{range .DockerInfo.Watchtower}}<p class="alert alert-warn">Watchtower est démarré (<code>{{.}}</code>) : il met les images à jour de son côté. Arrêtez-le pour que PatchWarden reste juste.</p>{{end}}
+  {{with $.Docker}}{{if .OK}}<p><a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker">Mettre à jour tout ce qui peut l'être ({{len .Groups}})…</a></p>{{end}}{{end}}
+  <p class="muted small">Seules les images du tag utilisé sont mises à jour. Une version plus récente publiée sous un autre tag est signalée, jamais appliquée : changez le tag vous-même après lecture du changelog.</p>
+</section>
+{{range $.DockerGroups}}
+<section class="card">
+  <div class="dh">
+    <h2>{{.Label}}{{if .Instance}} <span class="muted small">· Portainer {{.Instance}}, environnement {{.EndpointID}}{{if .Git}}, Git{{end}}</span>{{else if .WorkDir}} <span class="muted small">· {{.WorkDir}}</span>{{end}}</h2>
+    {{if .Updatable}}<a class="btn s p" href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/docker?groupe={{.Key}}">Mettre à jour…</a>
+    {{else if .Updates}}<span class="b w">à mettre à jour à la main</span>
+    {{else}}<span class="b ok">à jour</span>{{end}}
+  </div>
+  {{if and .Blocker .Updates}}<p class="small muted">{{.Blocker}}</p>{{end}}
+  {{range .Warnings}}<p class="small alert alert-warn">{{.}}</p>{{end}}
+  <div class="tablewrap"><table>
+    <thead><tr><th>Conteneur</th><th>Image</th><th>État</th><th>Registre</th><th>Autre tag</th><th></th></tr></thead>
+    <tbody>
+    {{range .Items}}
+    <tr>
+      <td>{{.Name}}{{if eq .Kind "watchtower"}} <span class="b w">Watchtower</span>{{end}}</td>
+      <td class="small"><code>{{.Image}}</code>{{with .Version}} <span class="muted">({{.}})</span>{{end}}</td>
+      <td>{{if .Running}}démarré{{else}}<span class="muted">{{.State}}</span>{{end}}</td>
+      <td>{{if eq .Check "update"}}<span class="b w" title="{{.CheckText}}">nouvelle image</span> <span class="muted small">{{since .Since}}</span>
+        {{- else if eq .Check "ok"}}<span class="b ok">à jour</span>
+        {{- else if eq .Check "local"}}<span class="b" title="{{.CheckText}}">image locale</span>
+        {{- else if eq .Check "pinned"}}<span class="b" title="{{.CheckText}}">épinglée</span>
+        {{- else if eq .Check "unknown"}}<span class="b" title="{{.CheckText}}">inconnu</span>
+        {{- else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{with .NewTag}}<span class="b v">{{.}}</span>{{end}}</td>
+      <td>{{with .ChangelogURL}}<a href="{{.}}" target="_blank" rel="noopener noreferrer">changelog ↗</a>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table></div>
+</section>
+{{end}}
+{{end}}
 
 {{else if eq .Tab "snapshots"}}
 <section class="card">

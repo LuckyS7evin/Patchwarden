@@ -17,6 +17,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"github.com/LuckyS7evin/patchwarden/internal/notify"
+	"github.com/LuckyS7evin/patchwarden/internal/registry"
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
 )
@@ -47,6 +48,13 @@ type Engine struct {
 	Batches *BatchStore
 	// EOL : fin de support des systèmes (facultatif : table intégrée).
 	EOL *eol.Checker
+	// Registry : comparaison des images Docker aux registres (nil : désactivée).
+	Registry *registry.Client
+	// Portainers : instances Portainer par nom ([[portainer]]), dans l'ordre
+	// de la configuration (PortainerOrder).
+	Portainers     map[string]Portainer
+	PortainerOrder []string
+	hosts          *dockerHosts
 }
 
 // OSSupport renvoie l'état du support du système d'un invité détecté.
@@ -71,7 +79,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 8
+const WrapperVersion = 9
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {
@@ -157,6 +165,7 @@ func (e *Engine) detectRun(ctx context.Context, g inventory.Guest, jobID string,
 	if g.Type == "lxc" {
 		e.enrichCS(ctx, g, &res, log)
 	}
+	e.enrichDocker(ctx, g, &res, log)
 
 	key := target(g).Key()
 	if err := e.Store.Put(key, res); err != nil {
@@ -329,6 +338,12 @@ func summarize(r detect.Result) string {
 		if a.UpdateAvailable() {
 			parts = append(parts, fmt.Sprintf("%s %s → %s", a.Name, a.Installed, a.Latest))
 		}
+	}
+	if n := r.DockerInfo.Updates(); n > 0 {
+		parts = append(parts, plural(n, "image Docker à mettre à jour", "images Docker à mettre à jour"))
+	}
+	if n := r.DockerInfo.Newer(); n > 0 {
+		parts = append(parts, plural(n, "conteneur avec une version plus récente (autre tag)", "conteneurs avec une version plus récente (autre tag)"))
 	}
 	if r.RebootRequired {
 		parts = append(parts, "redémarrage requis")

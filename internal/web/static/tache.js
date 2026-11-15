@@ -9,6 +9,7 @@
   var es = new EventSource(pre.dataset.flux);
 
   function has(text, markers) {
+    text = text.replace("▶ vm-", "▶ lxc-"); // une VM a les mêmes verbes en vm-
     return (markers || "").split("|").some(function (m) { return m && text.indexOf(m) >= 0; });
   }
   // Mêmes règles que stepsFor (steps.go).

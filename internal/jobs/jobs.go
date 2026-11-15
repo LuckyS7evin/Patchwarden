@@ -51,6 +51,8 @@ const (
 	KindServices Kind = "redémarrage des services"
 	// KindReboot : redémarrage du CT.
 	KindReboot Kind = "redémarrage du CT"
+	// KindDocker : mise à jour des conteneurs Docker.
+	KindDocker Kind = "conteneurs Docker"
 )
 
 // Target est l'invité visé.

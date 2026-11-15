@@ -78,6 +78,21 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, se *sessio
 		setting{"snapshots.keep", itoa(keep), "snapshots PatchWarden gardés par invité"},
 		setting{"snapshots.max_storage_pct", itoa(maxPct) + " %", "snapshot refusé au-delà"},
 	)
+	dock := []setting{{"docker.registry_check", yes(c.Docker.RegistryCheck == nil || *c.Docker.RegistryCheck), "comparaison des images aux registres (empreinte du tag, versions plus récentes)"}}
+	for _, p := range c.Portainer {
+		tok := "absent"
+		if p.Token != "" {
+			tok = "défini"
+			if p.TokenEnv != "" {
+				tok = "lu dans " + p.TokenEnv
+			}
+		}
+		dock = append(dock, setting{"portainer." + p.Name, redactURL(p.URL), "jeton : " + tok})
+	}
+	if len(c.Portainer) == 0 {
+		dock = append(dock, setting{"portainer", "aucune instance", "stacks Portainer : détection seulement"})
+	}
+	add("Docker", dock...)
 	sched := strings.Join(c.Schedule.DetectAt, ", ")
 	if sched == "" {
 		sched = "aucune"

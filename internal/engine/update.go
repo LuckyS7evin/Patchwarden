@@ -336,6 +336,11 @@ func (e *Engine) updateFunc(p Plan, dryRun bool) jobs.Func {
 					return strings.Join(summary, " · "), err
 				}
 				summary = append(summary, "update community-scripts : "+p.CSNote)
+				if needsRerun(out) {
+					msg := "le script demande de relancer update (migration par étapes) : relancez « Tout mettre à jour » après vérification"
+					log(false, "⚠ "+msg)
+					summary = append(summary, "⚠ "+msg)
+				}
 			}
 		} else if p.CSNote != "" {
 			log(false, "  "+p.CSNote)
@@ -500,4 +505,16 @@ func VMIDKey(node string, vmid int) string { return node + "/" + strconv.Itoa(vm
 // SetAnswers enregistre les réponses d'un invité aux questions de son script.
 func (e *Engine) SetAnswers(key string, answers map[string]string) error {
 	return e.Answers.Set(key, answers)
+}
+
+// needsRerun repère les scripts qui migrent par étapes (Termix : passage
+// obligé par une version intermédiaire) et demandent une nouvelle exécution.
+func needsRerun(lines []string) bool {
+	for _, l := range lines {
+		low := strings.ToLower(l)
+		if strings.Contains(low, "run update again") || strings.Contains(low, "run the update again") {
+			return true
+		}
+	}
+	return false
 }

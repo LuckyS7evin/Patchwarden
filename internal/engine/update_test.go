@@ -197,3 +197,12 @@ func TestAptCount(t *testing.T) {
 		t.Errorf("repli sur les lignes Inst : %d", n)
 	}
 }
+
+func TestNeedsRerun(t *testing.T) {
+	if !needsRerun([]string{"[2026-11-15 01:17:54] [WARN] Run update again to continue to the current Termix release"}) {
+		t.Error("migration par étapes de Termix non repérée")
+	}
+	if needsRerun([]string{"[OK] Updated successfully!"}) {
+		t.Error("faux positif")
+	}
+}

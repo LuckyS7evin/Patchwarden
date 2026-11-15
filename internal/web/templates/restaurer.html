@@ -1,0 +1,51 @@
+{{define "content"}}
+{{with .Row}}
+<p class="crumbs"><a href="/">Inventaire</a> › <a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></p>
+<div class="pagehead">
+  <div>
+    <h1 class="titlewithicon"><img class="appicon appicon-lg" src="{{.Icon}}" alt="" width="40" height="40">Retour arrière · {{.Name}}&nbsp;<span class="muted">· LXC {{.VMID}} sur {{.Node}}</span></h1>
+  </div>
+</div>
+{{end}}
+
+{{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+
+<section class="card">
+  <h2>Snapshot <code>{{.Snap.Name}}</code></h2>
+  <dl class="facts">
+    <dt>Date</dt><dd>{{if not .Snap.Time.IsZero}}{{date .Snap.Time}} ({{age .Snap.Time}}){{else}}inconnue{{end}}</dd>
+    <dt>Description</dt><dd>{{.Snap.Description}}</dd>
+  </dl>
+</section>
+
+<section class="card">
+  <h2>Ce qui va se passer</h2>
+  <p class="alert alert-warn">Tout ce qui a changé dans le CT depuis ce snapshot sera perdu : les mises à jour, mais aussi les données de l'application (base de données, fichiers, réglages, comptes créés depuis).</p>
+  <ol class="steps">
+    <li>le CT est arrêté ;</li>
+    <li>son disque revient à l'état du snapshot (<code>pct rollback</code>) ;</li>
+    <li>il est redémarré s'il tournait avant ;</li>
+    <li>une détection vérifie le résultat.</li>
+  </ol>
+  {{if .Binds}}<p class="small">Les {{.Binds}} point(s) de montage liés à l'hôte ne sont pas concernés : leur contenu reste tel quel.</p>{{end}}
+  <p class="small">Le snapshot est conservé : vous pourrez le supprimer ensuite depuis la page de l'invité.</p>
+</section>
+
+{{if .Why}}
+<section class="card">
+  <h2>Action impossible</h2>
+  <p class="crit">{{.Why}}</p>
+</section>
+{{else}}
+<section class="card">
+  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/snapshots/{{.Snap.Name}}/restaurer" class="launch-box apply">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <h3>Confirmer le retour arrière</h3>
+    <label>Saisissez le nom de l'invité (<code>{{.Row.Name}}</code>)
+      <input name="nom" required autocomplete="off">
+    </label>
+    <button type="submit" class="btn btn-danger">Revenir à ce snapshot</button>
+  </form>
+</section>
+{{end}}
+{{end}}

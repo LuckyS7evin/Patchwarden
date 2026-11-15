@@ -44,6 +44,60 @@
 </section>
 {{end}}
 
+{{if and (eq .Row.Type "lxc") .Row.Det}}
+<section class="card">
+  <h2>Snapshots</h2>
+  {{with .Row.Det.Snap}}
+  {{if not .Known}}<p class="muted">Informations absentes : relancez une détection (wrapper v5 requis sur le nœud).</p>
+  {{else}}
+  <p>
+    {{if .Possible}}<span class="badge badge-ok">snapshots possibles</span>{{else}}<span class="badge badge-crit">le stockage ne permet pas les snapshots</span>{{end}}
+    {{range .Storages}}<span class="badge">{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{printf "%.0f" .UsedPct}} %{{end}}</span>{{end}}
+    {{if .Binds}}<span class="muted small">· {{.Binds}} point(s) de montage lié(s) à l'hôte, hors snapshot</span>{{end}}
+    {{if .Other}}<span class="muted small">· {{.Other}} snapshot(s) manuel(s), jamais touchés par PatchWarden</span>{{end}}
+  </p>
+  {{if .PW}}
+  <div class="tablewrap"><table>
+    <thead><tr><th>Snapshot PatchWarden</th><th>Date</th><th>Description</th><th></th></tr></thead>
+    <tbody>
+    {{range .PW}}
+    <tr>
+      <td class="nowrap"><code>{{.Name}}</code></td>
+      <td>{{if not .Time.IsZero}}{{date .Time}}{{end}}</td>
+      <td class="small">{{.Description}}</td>
+      <td class="snapactions">
+        {{if not $.SnapWhy}}<div class="snapactions-in">
+        <a class="btn btn-small" href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/snapshots/{{.Name}}/restaurer">Revenir à cet état…</a>
+        <form method="post" action="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/snapshots/{{.Name}}/supprimer" class="inline-form">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <label class="small"><input type="checkbox" name="confirme" value="1" required> confirmer</label>
+          <button type="submit" class="btn btn-small">Supprimer</button>
+        </form>
+        </div>{{end}}
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{if $.SnapWhy}}<p class="muted small">Retour arrière et suppression indisponibles : {{$.SnapWhy}}</p>{{end}}
+  {{else}}<p class="muted">Aucun snapshot PatchWarden.</p>{{end}}
+  {{end}}
+  {{end}}
+  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/snapshots/reglage" class="inline-form spaced">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Case « snapshot avant mise à jour » pour cet invité :
+      <select name="reglage">
+        <option value="" {{if eq .SnapPref ""}}selected{{end}}>automatique</option>
+        <option value="toujours" {{if eq .SnapPref "toujours"}}selected{{end}}>toujours cochée</option>
+        <option value="jamais" {{if eq .SnapPref "jamais"}}selected{{end}}>jamais cochée d'office</option>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-small">Enregistrer</button>
+  </form>
+  <p class="muted small">Automatique : cochée {{if .SnapDefaults.Default}}pour tous les invités (réglage global){{else}}pour les invités critiques et les changements de version majeure{{end}}. PatchWarden garde {{.SnapDefaults.Keep}} snapshot(s) par invité et refuse le snapshot, donc la mise à jour, si le stockage est rempli à {{.SnapDefaults.MaxPct}} % ou plus.</p>
+</section>
+{{end}}
+
 {{if .Answers}}
 <section class="card">
   <h2>Questions posées par le script</h2>

@@ -92,6 +92,7 @@
           {{if .CommunityScript}}<span class="badge badge-cs">community-scripts</span>{{end}}
           {{if .Critical}}<span class="badge badge-crit" title="Motif : {{.CriticalReason}}">confirmation renforcée</span>{{end}}
           {{if .Template}}<span class="badge">modèle</span>{{end}}
+          {{with .Det}}{{with .Snap.PW}}<span class="badge" title="{{range .}}{{.Name}} {{end}}">{{len .}} snapshot PW</span>{{end}}{{end}}
           {{if .Lock}}<span class="badge badge-warn">verrou : {{.Lock}}</span>{{end}}
           {{if .Stale}}<span class="badge badge-warn">nœud injoignable, données anciennes</span>{{end}}
         </td>

@@ -66,12 +66,12 @@ func TestPlanBlockers(t *testing.T) {
 	if !sec.OK() || sec.CSRun || len(sec.Packages) != 1 || sec.Packages[0].Name != "libssl3t64" {
 		t.Errorf("sécurité : %+v", sec)
 	}
-	if _, err := e.eng.Execute(e.guest, ActSecurity, false, "admin", false, ""); !errors.Is(err, ErrConfirm) {
+	if _, err := e.eng.Execute(e.guest, ActSecurity, false, "admin", false, "", false); !errors.Is(err, ErrConfirm) {
 		t.Errorf("exécution sans confirmation : %v", err)
 	}
 	crit := e.guest
 	crit.Critical, crit.CriticalReason = true, "tag « critique »"
-	if _, err := e.eng.Execute(crit, ActSecurity, false, "admin", true, "autre"); !errors.Is(err, ErrConfirm) {
+	if _, err := e.eng.Execute(crit, ActSecurity, false, "admin", true, "autre", false); !errors.Is(err, ErrConfirm) {
 		t.Errorf("invité critique sans le nom : %v", err)
 	}
 	if n := len(e.eng.Jobs.List("", 0)); n != 1 {
@@ -82,7 +82,7 @@ func TestPlanBlockers(t *testing.T) {
 func TestSecuritySimulation(t *testing.T) {
 	e := setup(t)
 	e.detect(t)
-	j, err := e.eng.Execute(e.guest, ActSecurity, true, "admin", false, "")
+	j, err := e.eng.Execute(e.guest, ActSecurity, true, "admin", false, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestFullUpdateEndToEnd(t *testing.T) {
 	if !p.OK() || answersArg(p.Answers) != "n" {
 		t.Fatalf("plan : %+v", p.Blockers)
 	}
-	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "")
+	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestCSUpdateFailureIsExplained(t *testing.T) {
 	e.detect(t)
 	_ = e.eng.Answers.Set(e.guest.Key(), map[string]string{nginxPrompt: "y"})
 	t.Setenv("FAKE_UPDATE_RC", "114")
-	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "")
+	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestCSUpdateWaitsForCPUs(t *testing.T) {
 	e.detect(t)
 	_ = e.eng.Answers.Set(e.guest.Key(), map[string]string{nginxPrompt: "y"})
 	t.Setenv("FAKE_CPU_LAG", "3")
-	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "")
+	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestCSUpdateCPUsNeverSeen(t *testing.T) {
 	e.detect(t)
 	_ = e.eng.Answers.Set(e.guest.Key(), map[string]string{nginxPrompt: "y"})
 	t.Setenv("FAKE_CPU_LAG", "jamais")
-	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "")
+	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

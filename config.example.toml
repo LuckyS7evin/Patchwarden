@@ -100,6 +100,13 @@ cache_ttl = "6h"
 # [schedule]
 # detect_at = ["03:40"]
 
+# Snapshots avant mise à jour (LXC ; stockage LVM-thin, ZFS, Ceph RBD ou Btrfs).
+# [snapshots]
+# default = false          # case cochée par défaut pour tous les invités ; sinon, seulement
+#                          # pour les invités critiques et les changements de version majeure
+# keep = 1                 # snapshots PatchWarden gardés par invité (les manuels ne sont jamais touchés)
+# max_storage_pct = 90     # snapshot (donc mise à jour) refusé au-delà de ce remplissage
+
 # Interface. Icônes des applis et des OS : selfh.st/icons (CC BY 4.0), téléchargées par
 # PatchWarden (pas par le navigateur) puis gardées dans data_dir/icons. Sans accès
 # Internet, ou avec icons = false : une pastille avec l'initiale.

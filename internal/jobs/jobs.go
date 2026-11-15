@@ -43,6 +43,10 @@ const (
 	KindDetect   Kind = "détection"
 	KindSecurity Kind = "sécurité uniquement"
 	KindFull     Kind = "tout mettre à jour"
+	// KindRollback : retour à un snapshot PatchWarden.
+	KindRollback Kind = "retour arrière"
+	// KindSnapDelete : suppression d'un snapshot PatchWarden.
+	KindSnapDelete Kind = "suppression de snapshot"
 )
 
 // Target est l'invité visé.

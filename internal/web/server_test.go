@@ -24,9 +24,12 @@ import (
 
 // fakeEngine soumet de vraies tâches au gestionnaire, avec un travail simulé.
 type fakeEngine struct {
-	jm      *jobs.Manager
-	release chan struct{}
-	answers map[string]map[string]string
+	jm       *jobs.Manager
+	release  chan struct{}
+	answers  map[string]map[string]string
+	prefs    map[string]string
+	lastSnap *bool
+	rolled   string
 }
 
 func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
@@ -40,10 +43,57 @@ func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
 			p.Blockers = []string{"le script pose des questions sans terminal : enregistrez une réponse pour chacune (page de l'invité)"}
 		}
 	}
+	p.Snap = engine.SnapPlan{Possible: true, Checked: g.Critical, Reason: "décochée par défaut", Name: "pw-20261113-1805-" + string(a), Storage: "local-lvm (lvmthin) : 45 %"}
+	if g.Critical {
+		p.Snap.Reason = "invité critique"
+	}
+	if g.Type == "qemu" {
+		p.Snap = engine.SnapPlan{Why: "le stockage de ce CT ne permet pas les snapshots (local : dir)"}
+	}
 	return p
 }
 
-func (f *fakeEngine) Execute(g inventory.Guest, a engine.Action, dry bool, user string, confirmed bool, name string) (jobs.Job, error) {
+func (f *fakeEngine) CanSnapAction(g inventory.Guest) error {
+	if g.Type != "lxc" {
+		return errors.New("snapshots des VM : prochain jalon")
+	}
+	return nil
+}
+
+func (f *fakeEngine) Rollback(g inventory.Guest, name, user, typed string) (jobs.Job, error) {
+	if typed != g.Name {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	f.rolled = name
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindRollback, t, false, user, func(context.Context, jobs.Job, jobs.Logger) (string, error) { return "ok", nil })
+}
+
+func (f *fakeEngine) DeleteSnapshot(g inventory.Guest, name, user string, confirmed bool) (jobs.Job, error) {
+	if !confirmed {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindSnapDelete, t, false, user, func(context.Context, jobs.Job, jobs.Logger) (string, error) { return "ok", nil })
+}
+
+func (f *fakeEngine) SnapPref(key string) string { return f.prefs[key] }
+
+func (f *fakeEngine) SetSnapPref(key, v string) error {
+	if v != "" && v != engine.PrefAlways && v != engine.PrefNever {
+		return errors.New("réglage inconnu")
+	}
+	if f.prefs == nil {
+		f.prefs = map[string]string{}
+	}
+	f.prefs[key] = v
+	return nil
+}
+
+func (f *fakeEngine) SnapDefaults() engine.SnapConfig { return engine.SnapConfig{Keep: 1, MaxPct: 90} }
+
+func (f *fakeEngine) Execute(g inventory.Guest, a engine.Action, dry bool, user string, confirmed bool, name string, snapshot bool) (jobs.Job, error) {
+	f.lastSnap = &snapshot
 	p := f.PlanFor(g, a)
 	if !p.OK() {
 		return jobs.Job{}, errors.New(p.Blockers[0])
@@ -543,5 +593,82 @@ func TestSecurityPage(t *testing.T) {
 	}
 	if !strings.Contains(body, "VM non couvertes") {
 		t.Error("les VM doivent être signalées comme non couvertes")
+	}
+}
+
+func TestSnapshotUI(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	csrf := h.csrf()
+
+	// Page d'action : case à cocher, nom prévu ; envoyée avec la mise à jour.
+	_ = h.eng.SetAnswers("loki/104", map[string]string{nginxQ: "y"})
+	_, body := h.do("GET", "/invites/loki/104/action/complet", nil, nil)
+	for _, want := range []string{`name="snapshot" value="1" >`, "pw-20261113-1805-complet", "Si le snapshot échoue, la mise à jour est annulée", `<input type="hidden" name="snapshot" value="1">`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page d'action sans %q", want)
+		}
+	}
+	resp, _ := h.do("POST", "/invites/loki/104/action/complet", url.Values{"csrf": {csrf}, "simulation": {"0"}, "confirme": {"1"}, "snapshot": {"1"}}, nil)
+	if resp.StatusCode != http.StatusSeeOther || h.eng.lastSnap == nil || !*h.eng.lastSnap {
+		t.Errorf("snapshot non transmis : %d %v", resp.StatusCode, h.eng.lastSnap)
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/action/complet", url.Values{"csrf": {csrf}, "simulation": {"0"}, "confirme": {"1"}}, nil)
+	if resp.StatusCode != http.StatusSeeOther || *h.eng.lastSnap {
+		t.Errorf("case décochée : snapshot transmis quand même")
+	}
+
+	// Page de l'invité : snapshots PatchWarden, réglage.
+	det := detect.Result{At: h.now, Apt: detect.Apt{Present: true}, Snap: detect.SnapInfo{
+		Known: true, Possible: true, Other: 2, Binds: 1,
+		Storages: []detect.StorageUse{{Name: "local-lvm", Type: "lvmthin", UsedPct: 45}},
+		PW:       []detect.Snapshot{{Name: "pw-20261115-0141-complet", Time: h.now, Description: "PatchWarden avant « tout mettre à jour »"}},
+	}}
+	if err := h.store.Put("loki/104", det); err != nil {
+		t.Fatal(err)
+	}
+	_, body = h.do("GET", "/invites/loki/104", nil, nil)
+	for _, want := range []string{"pw-20261115-0141-complet", "/snapshots/pw-20261115-0141-complet/restaurer", "2 snapshot(s) manuel(s), jamais touchés", "local-lvm (lvmthin) : 45 %", "jamais cochée d'office"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page de l'invité sans %q", want)
+		}
+	}
+	_, body = h.do("GET", "/", nil, nil)
+	if !strings.Contains(body, "1 snapshot PW") {
+		t.Error("badge de snapshot absent de l'inventaire")
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/snapshots/reglage", url.Values{"csrf": {csrf}, "reglage": {"toujours"}}, nil)
+	if resp.StatusCode != http.StatusSeeOther || h.eng.prefs["loki/104"] != "toujours" {
+		t.Errorf("réglage non enregistré : %v", h.eng.prefs)
+	}
+
+	// Retour arrière : page d'avertissement, nom à saisir.
+	resp, body = h.do("GET", "/invites/loki/104/snapshots/pw-20261115-0141-complet/restaurer", nil, nil)
+	if resp.StatusCode != 200 || !strings.Contains(body, "sera perdu") || !strings.Contains(body, "de montage liés à l'hôte") {
+		t.Errorf("page de retour arrière : %d", resp.StatusCode)
+	}
+	if resp, _ := h.do("GET", "/invites/loki/104/snapshots/avant-maj/restaurer", nil, nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("snapshot manuel : %d (404 attendu)", resp.StatusCode)
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/snapshots/pw-20261115-0141-complet/restaurer", url.Values{"csrf": {csrf}, "nom": {"autre"}}, nil)
+	if loc := resp.Header.Get("Location"); !strings.Contains(loc, "erreur=") || h.eng.rolled != "" {
+		t.Errorf("mauvais nom accepté : %s", loc)
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/snapshots/pw-20261115-0141-complet/restaurer", url.Values{"csrf": {csrf}, "nom": {"termix"}}, nil)
+	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/taches/") || h.eng.rolled != "pw-20261115-0141-complet" {
+		t.Errorf("retour arrière : %s", loc)
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/snapshots/pw-20261115-0141-complet/supprimer", url.Values{"csrf": {csrf}}, nil)
+	if loc := resp.Header.Get("Location"); !strings.Contains(loc, "erreur=") {
+		t.Errorf("suppression sans confirmation : %s", loc)
+	}
+}
+
+func TestSnapshotImpossibleShown(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_, body := h.do("GET", "/invites/loki/203/action/securite", nil, nil)
+	if !strings.Contains(body, "Impossible : le stockage de ce CT ne permet pas les snapshots") || strings.Contains(body, `name="snapshot" value="1"`) {
+		t.Errorf("snapshot impossible mal affiché")
 	}
 }

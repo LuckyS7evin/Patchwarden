@@ -14,7 +14,7 @@ de mémoire, sans agent dans les invités.
 | 2 | Wrapper SSH sur les nœuds, tâches asynchrones, journaux en direct, historique, **détection** (apt, appli community-scripts, dernière version, changelog) | ✅ |
 | 3 | Mises à jour d'un LXC : simulation, « Sécurité uniquement », « Tout mettre à jour » (apt + `update` community-scripts), confirmation | ✅ |
 | 4 | Détection planifiée, notifications (ntfy, Gotify, webhook), vue sécurité | ✅ |
-| 5 | Snapshots avant mise à jour, retour arrière en un clic | à faire |
+| 5 | Snapshots avant mise à jour, retour arrière en un clic | ✅ |
 | 6 | Lots, regroupement par tags, redémarrages requis | à faire |
 | 7 | VMs (guest agent), OMV/PBS, fin de support des OS | à faire |
 | 8 | Docker (API Portainer) | à faire |
@@ -60,8 +60,20 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
   CC BY 4.0, mises en cache par PatchWarden, réglage `[ui]`) ; une migration par étapes
   (le script demande de relancer `update`) est signalée dans le résumé de la tâche.
 
-Pas encore de snapshot automatique avant mise à jour (prochain jalon) : gardez vos
-sauvegardes PBS à jour pour les invités sensibles.
+- **snapshots avant mise à jour** (LXC) :
+  - case « Prendre un snapshot avant la mise à jour » sur la page de confirmation ; décochée
+    par défaut, pré-cochée pour les invités critiques, les changements de version majeure,
+    ou partout avec `[snapshots] default = true` ; réglage propre à chaque invité
+    (automatique, toujours, jamais d'office) sur sa page ;
+  - nom explicite (`pw-20261115-0141-complet`) et description en clair (action, versions,
+    utilisateur) ; si le snapshot échoue, **la mise à jour est annulée** ;
+  - refusé avec un message clair si le stockage ne permet pas les snapshots (stockage
+    `dir`, NFS…) ou s'il est rempli à 90 % ou plus (`max_storage_pct`) ; la simulation le vérifie aussi ;
+  - rétention : PatchWarden ne garde que le dernier de ses snapshots par invité (`keep`) ;
+    les snapshots créés à la main ne sont jamais touchés ;
+  - **retour arrière** depuis la page de l'invité (nom de l'invité à saisir) : le CT est
+    arrêté, restauré, redémarré s'il tournait, puis une détection vérifie le résultat ;
+    suppression d'un snapshot PatchWarden en un clic (avec confirmation).
 
 ## Installation
 
@@ -291,19 +303,28 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v4) | Effet |
+| Verbe (wrapper v5) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
 | `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
 | `lxc-apt <vmid> <security\|full> <0\|1>` | `apt-get update` puis `apt-get --with-new-pkgs upgrade` (dépôts `*-security` seuls en mode `security`). `1` = simulation (`apt-get -s`), rien n'est modifié |
 | `lxc-cs-update <vmid> <réponses> <cpu> <ram>` | Commande `update` community-scripts sans terminal (`PHS_SILENT=1`), réponses aux questions sur l'entrée standard. Si le CT a moins que `cpu`/`ram` (exigés par le script) : `pct set` temporaire, attente que le CT voie les nouvelles valeurs (les CPU sont appliqués par `pvestatd`, jusqu'à 10 s), puis restauration des valeurs d'origine |
+| `lxc-snapshot <vmid> <nom> <garder> <seuil> <0\|1> <description>` | `pct snapshot` (nom `pw-AAAAMMJJ-HHMM-action` exigé), après vérification du stockage (`pvesh …/feature`, `pvesm status`) ; puis `pct delsnapshot` des snapshots PatchWarden au-delà de `garder`. `1` = vérification seule |
+| `lxc-snapdel <vmid> <nom>` | `pct delsnapshot` d'un snapshot PatchWarden (`pw-…`) uniquement |
+| `lxc-rollback <vmid> <nom>` | `pct rollback` vers un snapshot PatchWarden (`pw-…`) uniquement, puis `pct start` si le CT tournait |
+
+Le wrapper refuse de lui-même tout snapshot dont le nom n'est pas `pw-…` : même une instance
+PatchWarden compromise ne pourrait ni supprimer ni restaurer vos snapshots manuels. Il lit
+aussi, sans rien modifier, la possibilité de snapshot, le remplissage des stockages et la
+liste des snapshots de chaque CT détecté (`pvesh get`, `pvesm status`).
 
 Les mises à jour réelles tournent **détachées sur le nœud**, sous un verrou par CT : si la
 connexion SSH est perdue (redémarrage de PatchWarden, réseau), l'opération se termine quand
 même, ressources restaurées comprises. Leur journal complet reste 30 jours sur le nœud dans
 `/var/log/patchwarden/`. Le wrapper écrit donc sur l'hôte uniquement ce journal et un fichier
-de verrou dans `/run/lock`, et lance `pct set` sur le CT visé (ressources) ; rien d'autre.
+de verrou dans `/run/lock`, et lance `pct set` (ressources), `pct snapshot`,
+`pct delsnapshot`, `pct rollback` et `pct start` sur le CT visé ; rien d'autre.
 
 ## Sécurité
 

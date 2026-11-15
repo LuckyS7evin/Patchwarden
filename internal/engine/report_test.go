@@ -100,9 +100,9 @@ func TestNotifyJob(t *testing.T) {
 	e.eng.Jobs.OnFinish = e.eng.NotifyJob
 	e.detect(t) // détection : pas de notification
 	_ = e.eng.Answers.Set(e.guest.Key(), map[string]string{nginxPrompt: "y"})
-	j, _ := e.eng.Execute(e.guest, ActSecurity, true, "admin", false, "") // simulation : pas de notification
+	j, _ := e.eng.Execute(e.guest, ActSecurity, true, "admin", false, "", false) // simulation : pas de notification
 	wait(t, e.eng.Jobs, j.ID)
-	j, err := e.eng.Execute(e.guest, ActSecurity, false, "admin", true, "")
+	j, err := e.eng.Execute(e.guest, ActSecurity, false, "admin", true, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

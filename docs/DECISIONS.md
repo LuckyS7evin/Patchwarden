@@ -220,7 +220,7 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | Jalon | Contenu |
 | :--- | :--- |
 | 4 ✅ | Détection planifiée (1), notifications (2), vue sécurité (3) |
-| 5 | Snapshots avant mise à jour (exigence initiale), retour arrière en un clic (5) |
+| 5 ✅ | Snapshots avant mise à jour (exigence initiale), retour arrière en un clic (5) |
 | 6 | Lots, regroupement par tags (6), redémarrages requis (8) |
 | 7 | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
 | 8 | Docker via l'API Portainer |
@@ -238,6 +238,22 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | Fin de tâche | Mise à jour réelle réussie (`succes`, désactivé par défaut) ou échouée/interrompue (`echec`) ; jamais pour une simulation |
 | Cibles | ntfy (publication JSON, UTF-8 sûr), Gotify, webhook générique ; l'e-mail viendra si besoin |
 | Envoi | Asynchrone, échecs journalisés, jamais bloquants |
+
+## Jalon 5 : snapshots et retour arrière (validé le 15/11/2026)
+
+| Sujet | Décision |
+| :--- | :--- |
+| Mécanisme | Par le wrapper (choix 1A) : le jeton API reste en lecture seule, aucun nouveau secret. Verbes `lxc-snapshot`, `lxc-snapdel`, `lxc-rollback`, limités par le wrapper lui-même aux noms `pw-AAAAMMJJ-HHMM-(complet\|securite)` |
+| Nom, description | `pw-20261115-0141-complet` (40 caractères au plus, imposé par Proxmox) ; description en clair (action, date, utilisateur, paquets, versions), transmise en base64url car la commande SSH n'accepte que `[A-Za-z0-9._ -]` |
+| Rétention | 1 snapshot PatchWarden par invité (`keep`), supprimés juste après la création du nouveau ; snapshots manuels jamais touchés |
+| Seuil | Refus à 90 % de remplissage d'un stockage du CT (`max_storage_pct`), ou si le remplissage est inconnu |
+| Case pré-cochée | Réglage de l'invité (toujours / jamais d'office), sinon réglage global, sinon invité critique ou changement de version majeure ; décochée sinon |
+| Échec | Snapshot impossible ou en échec : mise à jour annulée avant toute modification. Échec après le snapshot : l'erreur rappelle le snapshot et le retour arrière possible |
+| Possibilité | Lue à chaque détection (`pvesh get /nodes/<n>/lxc/<id>/feature --feature snapshot`, `pvesm status`), revérifiée par le wrapper juste avant le snapshot ; la simulation la vérifie aussi |
+| Points de montage liés | Signalés : ils ne font pas partie du snapshot |
+| Retour arrière | Nom de l'invité à saisir ; CT arrêté, `pct rollback`, `pct start` s'il tournait, détection ; refusé sur l'invité qui héberge PatchWarden ; possible sur un CT arrêté |
+| Restauration des CPU | Le wrapper attend aussi que le CT revoie ses CPU d'origine (non bloquant), pour que la détection de fin soit juste |
+| VMs | Jalon 7 (avec le guest agent) |
 
 ## Questions encore ouvertes
 

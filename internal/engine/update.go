@@ -77,6 +77,8 @@ type Plan struct {
 	Bump             bool
 	// NeedName : invité critique, le nom doit être saisi pour confirmer.
 	NeedName bool
+	// Snap : snapshot proposé avant la mise à jour.
+	Snap SnapPlan
 }
 
 // OK indique que l'action est possible.
@@ -164,6 +166,7 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 		p.Warnings = append(p.Warnings, "invité critique ("+g.CriticalReason+") : saisissez son nom pour confirmer")
 	}
 	p.Steps = append(p.Steps, "détection après la mise à jour, pour vérifier le résultat")
+	e.planSnapshot(&p, det)
 	return p
 }
 
@@ -258,11 +261,16 @@ func answersArg(ans []PromptAnswer) string {
 var ErrConfirm = errors.New("confirmation manquante ou incorrecte")
 
 // Execute lance une action (ou sa simulation) après vérification du plan.
-// confirmed : case de confirmation cochée ; typedName : nom saisi (invités critiques).
-func (e *Engine) Execute(g inventory.Guest, a Action, dryRun bool, user string, confirmed bool, typedName string) (jobs.Job, error) {
+// confirmed : case de confirmation cochée ; typedName : nom saisi (invités
+// critiques) ; snapshot : snapshot avant la mise à jour (en simulation : la
+// possibilité du snapshot est seulement vérifiée).
+func (e *Engine) Execute(g inventory.Guest, a Action, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error) {
 	p := e.PlanFor(g, a)
 	if !p.OK() {
 		return jobs.Job{}, errors.New(p.Blockers[0])
+	}
+	if snapshot && !p.Snap.Possible {
+		return jobs.Job{}, errors.New("snapshot impossible : " + p.Snap.Why)
 	}
 	if !dryRun {
 		if !confirmed {
@@ -272,12 +280,18 @@ func (e *Engine) Execute(g inventory.Guest, a Action, dryRun bool, user string, 
 			return jobs.Job{}, fmt.Errorf("%w : saisissez exactement le nom de l'invité (%s)", ErrConfirm, g.Name)
 		}
 	}
-	return e.Jobs.Submit(a.Kind(), target(g), dryRun, user, e.updateFunc(p, dryRun))
+	return e.Jobs.Submit(a.Kind(), target(g), dryRun, user, e.updateFunc(p, dryRun, snapshot, user))
 }
 
-func (e *Engine) updateFunc(p Plan, dryRun bool) jobs.Func {
+func (e *Engine) updateFunc(p Plan, dryRun, snapshot bool, user string) jobs.Func {
 	g := p.Guest
-	return func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
+	return func(ctx context.Context, job jobs.Job, log jobs.Logger) (_ string, err error) {
+		taken := ""
+		defer func() {
+			if err != nil && taken != "" {
+				err = fmt.Errorf("%w · snapshot %s pris avant la mise à jour : retour arrière possible depuis la page de l'invité", err, taken)
+			}
+		}()
 		mode := "full"
 		if p.Action == ActSecurity {
 			mode = "security"
@@ -288,6 +302,15 @@ func (e *Engine) updateFunc(p Plan, dryRun bool) jobs.Func {
 			log(false, "SIMULATION : rien ne sera modifié dans l'invité")
 		}
 		log(false, fmt.Sprintf("Plan « %s » pour CT %d (%s) sur %s :", p.Action.Label(), g.VMID, g.Name, g.Node))
+		if snapshot {
+			msg := "snapshot avant toute modification ; s'il échoue, la mise à jour est annulée"
+			if len(p.Snap.Removed) > 0 {
+				msg += " ; rétention : " + strings.Join(p.Snap.Removed, ", ") + " sera supprimé ensuite"
+			}
+			log(false, "  0. "+msg)
+		} else {
+			log(false, "  0. pas de snapshot")
+		}
 		for i, s := range p.Steps {
 			log(false, fmt.Sprintf("  %d. %s", i+1, s))
 		}
@@ -295,6 +318,23 @@ func (e *Engine) updateFunc(p Plan, dryRun bool) jobs.Func {
 			log(false, "  ⚠ "+w)
 		}
 		var summary []string
+
+		// 0. snapshot
+		if snapshot {
+			name, err := e.takeSnapshot(ctx, p, dryRun, user, log)
+			if err != nil {
+				if dryRun {
+					return "", fmt.Errorf("le snapshot serait refusé : %w", err)
+				}
+				return "", fmt.Errorf("mise à jour annulée, rien n'a été modifié : snapshot impossible : %w", err)
+			}
+			if dryRun {
+				summary = append(summary, "snapshot possible")
+			} else {
+				taken = name
+				summary = append(summary, "snapshot "+name)
+			}
+		}
 
 		// 1. apt
 		cmd := fmt.Sprintf("lxc-apt %d %s %s", g.VMID, mode, dry)

@@ -50,7 +50,22 @@ type Config struct {
 	Upstream  Upstream   `toml:"upstream"`
 	Schedule  Schedule   `toml:"schedule"`
 	UI        UI         `toml:"ui"`
+	Snapshots Snapshots  `toml:"snapshots"`
 	Notify    []Notify   `toml:"notify"`
+}
+
+// Snapshots règle les snapshots pris avant une mise à jour (LXC).
+type Snapshots struct {
+	// Default : case « snapshot avant mise à jour » cochée par défaut pour tous
+	// les invités. Défaut : false. Elle est de toute façon pré-cochée pour les
+	// invités critiques et les changements de version majeure, et chaque
+	// invité peut avoir son propre réglage (page de l'invité).
+	Default bool `toml:"default"`
+	// Keep : nombre de snapshots PatchWarden gardés par invité (1 à 9). Défaut : 1.
+	Keep int `toml:"keep"`
+	// MaxStoragePct : snapshot (et donc mise à jour) refusé si un stockage de
+	// l'invité est rempli à ce pourcentage ou plus (1 à 99). Défaut : 90.
+	MaxStoragePct int `toml:"max_storage_pct"`
 }
 
 // UI règle l'interface.
@@ -276,6 +291,12 @@ func (c *Config) applyDefaults() {
 	if c.CS.WebsiteURL == "" {
 		c.CS.WebsiteURL = "https://community-scripts.org"
 	}
+	if c.Snapshots.Keep == 0 {
+		c.Snapshots.Keep = 1
+	}
+	if c.Snapshots.MaxStoragePct == 0 {
+		c.Snapshots.MaxStoragePct = 90
+	}
 	if c.UI.Icons == nil {
 		t := true
 		c.UI.Icons = &t
@@ -394,6 +415,12 @@ func (c *Config) Validate() error {
 	}
 	if u, err := url.Parse(c.UI.IconBase); err != nil || u.Scheme != "https" || u.Host == "" {
 		add("ui.icon_base : URL https attendue, obtenu %q", c.UI.IconBase)
+	}
+	if c.Snapshots.Keep < 1 || c.Snapshots.Keep > 9 {
+		add("snapshots.keep : 1 à 9, obtenu %d", c.Snapshots.Keep)
+	}
+	if c.Snapshots.MaxStoragePct < 1 || c.Snapshots.MaxStoragePct > 99 {
+		add("snapshots.max_storage_pct : 1 à 99, obtenu %d", c.Snapshots.MaxStoragePct)
 	}
 	for _, t := range c.Schedule.DetectAt {
 		if _, err := time.Parse("15:04", t); err != nil {

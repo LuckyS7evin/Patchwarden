@@ -70,6 +70,10 @@ type guestData struct {
 	// Paquets séparés pour l'affichage.
 	SecurityPkgs, OtherPkgs []detect.Package
 	StrictMissing           int
+	// Snapshots : réglage de l'invité, réglage global, actions possibles.
+	SnapPref     string
+	SnapDefaults engine.SnapConfig
+	SnapWhy      string // retour arrière / suppression impossibles : pourquoi
 }
 
 func (s *Server) guestPage(w http.ResponseWriter, r *http.Request, se *session) {
@@ -93,6 +97,11 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request, se *session) 
 				d.Answers = p.Answers
 			}
 		}
+	}
+	d.SnapPref = s.deps.Engine.SnapPref(g.Key())
+	d.SnapDefaults = s.deps.Engine.SnapDefaults()
+	if err := s.deps.Engine.CanSnapAction(g); err != nil {
+		d.SnapWhy = err.Error()
 	}
 	if det := d.Row.Det; det != nil {
 		for _, p := range det.Apt.Packages {
@@ -258,7 +267,8 @@ func (s *Server) actionSubmit(w http.ResponseWriter, r *http.Request, se *sessio
 		return
 	}
 	dry := r.PostFormValue("simulation") == "1"
-	j, err := s.deps.Engine.Execute(g, a, dry, se.user, r.PostFormValue("confirme") == "1", r.PostFormValue("nom"))
+	snap := r.PostFormValue("snapshot") == "1"
+	j, err := s.deps.Engine.Execute(g, a, dry, se.user, r.PostFormValue("confirme") == "1", r.PostFormValue("nom"), snap)
 	if err != nil {
 		if errors.Is(err, jobs.ErrBusy) {
 			if act, ok := s.deps.Jobs.ActiveFor(jobs.Target{Node: g.Node, VMID: g.VMID}); ok {
@@ -269,7 +279,7 @@ func (s *Server) actionSubmit(w http.ResponseWriter, r *http.Request, se *sessio
 		http.Redirect(w, r, guestURL(g)+"/action/"+string(a)+"?erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	s.log.Info("mise à jour demandée", "invité", g.Key(), "action", a, "simulation", dry, "tâche", j.ID, "par", se.user)
+	s.log.Info("mise à jour demandée", "invité", g.Key(), "action", a, "simulation", dry, "snapshot", snap, "tâche", j.ID, "par", se.user)
 	http.Redirect(w, r, "/taches/"+j.ID, http.StatusSeeOther)
 }
 

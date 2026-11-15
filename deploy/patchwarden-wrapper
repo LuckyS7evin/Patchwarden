@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 4) :
+# Verbes (version 5) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -25,15 +25,30 @@
 #                                          temporairement puis restauré, même en cas d'échec ;
 #                                          update n'est lancé qu'une fois les ressources
 #                                          visibles dans le CT (code 32 sinon).
+#   lxc-snapshot <vmid> <nom> <garder> <seuil_pct> <0|1> <description>
+#                                          snapshot avant mise à jour (1 = vérification seule) ;
+#                                          refusé si le stockage ne le permet pas ou s'il est
+#                                          rempli à <seuil_pct> % ou plus ; ne garde ensuite que
+#                                          les <garder> plus récents snapshots PatchWarden.
+#                                          <description> : base64url (UTF-8), ou « - »
+#   lxc-snapdel <vmid> <nom>               suppression d'un snapshot PatchWarden
+#   lxc-rollback <vmid> <nom>              retour à un snapshot PatchWarden ; le CT est
+#                                          redémarré ensuite s'il tournait avant
+#
+# Snapshots : seuls ceux dont le nom suit pw-AAAAMMJJ-HHMM-(complet|securite)
+# sont acceptés. Les snapshots créés à la main ne sont jamais touchés.
 #
 # Codes de sortie : 0 succès, 2 requête refusée, 3 invité non démarré,
+# 40 snapshot impossible sur ce stockage, 41 stockage trop rempli (ou remplissage
+# inconnu), 42 snapshot déjà existant, 43 échec de pct snapshot, 44 snapshot
+# introuvable, 45 échec de pct delsnapshot / rollback, 46 CT non redémarré,
 # autre : code renvoyé par la commande exécutée dans l'invité.
 # ==============================================================================
 
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=4
+WRAPPER_VERSION=5
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -69,11 +84,17 @@ read -r -a ARGS <<<"$CMD"
 VERB="${ARGS[0]:-}"
 [[ -n "$VERB" ]] || refuse "commande vide"
 
+# Vérifie qu'un CT existe sur CE nœud.
+check_ct_exists() {
+	local vmid="$1"
+	[[ "$vmid" =~ ^[1-9][0-9]{1,8}$ ]] || refuse "VMID invalide : $vmid"
+	[[ -f "${PVE_DIR}/nodes/${NODE}/lxc/${vmid}.conf" ]] || refuse "CT ${vmid} absent du nœud ${NODE}"
+}
+
 # Vérifie qu'un CT existe sur CE nœud et qu'il est démarré.
 check_ct() {
 	local vmid="$1" status
-	[[ "$vmid" =~ ^[1-9][0-9]{1,8}$ ]] || refuse "VMID invalide : $vmid"
-	[[ -f "${PVE_DIR}/nodes/${NODE}/lxc/${vmid}.conf" ]] || refuse "CT ${vmid} absent du nœud ${NODE}"
+	check_ct_exists "$vmid"
 	status="$(pct status "$vmid" 2>/dev/null)"
 	if [[ "$status" != "status: running" ]]; then
 		echo "PW-ARRETE: CT ${vmid} non démarré (${status:-état inconnu})" >&2
@@ -394,6 +415,24 @@ wait_resources() {
 	done
 }
 
+# Même délai à la restauration : la détection qui suit verrait encore les CPU
+# augmentés. Non bloquant.
+wait_cpu_restored() {
+	local cpu="$1" start=$SECONDS c
+	while :; do
+		read -r c _ < <(timeout 30 pct exec "$VMID" -- sh -s <<<"$SEEN" 2>/dev/null | sed -n 's/^pw\.seen=//p')
+		if [[ "${c:-}" =~ ^[0-9]+$ ]] && ((c <= cpu)); then
+			echo "PW: le CT voit de nouveau ${c} CPU"
+			return 0
+		fi
+		if ((SECONDS - start >= RES_WAIT)); then
+			echo "PW: le CT verra ses ${cpu} CPU d'origine au prochain passage de pvestatd"
+			return 0
+		fi
+		sleep "$RES_POLL"
+	done
+}
+
 restore_resources() {
 	local rc=$?
 	trap - EXIT HUP INT TERM PIPE
@@ -403,11 +442,176 @@ restore_resources() {
 	if pct set "$VMID" "${args[@]}"; then
 		echo "PW: ressources restaurées : ${ORIG_CORES:-tous les} CPU / ${ORIG_MEM:-512} Mo"
 		log "lxc-cs-update ${VMID} : ressources restaurées"
+		[[ -n "$ORIG_CORES" ]] && wait_cpu_restored "$ORIG_CORES"
 	else
 		echo "PW-ALERTE: impossible de restaurer les ressources du CT ${VMID} (${ORIG_CORES:-?} CPU / ${ORIG_MEM:-512} Mo) : à corriger à la main"
 		log "ALERTE : ressources du CT ${VMID} non restaurées"
 	fi
 	exit "$rc"
+}
+
+# ------------------------------------------------------------------------------
+# Snapshots (côté nœud). Seuls les snapshots nommés par PatchWarden sont gérés.
+# ------------------------------------------------------------------------------
+PW_SNAP_RE='^pw-[0-9]{8}-[0-9]{4}-(complet|securite)$'
+SNAP=""
+KEEP=1
+MAXPCT=90
+DESC64="-"
+
+# snap_info décrit les snapshots du CT $VMID (lignes snap.*) : possibilité
+# (API Proxmox, mêmes règles que l'interface), stockages et remplissage,
+# snapshots PatchWarden (nom, date, description), nombre des autres snapshots.
+snap_info() {
+	local conf="${PVE_DIR}/nodes/${NODE}/lxc/${VMID}.conf" feat vol st line binds=0
+	local -A seen=()
+	echo "snap.info=1"
+	feat="$(pvesh get "/nodes/${NODE}/lxc/${VMID}/feature" --feature snapshot --output-format json 2>/dev/null)"
+	if [[ "$feat" =~ \"hasFeature\":[[:space:]]*(1|true) ]]; then echo "snap.possible=1"; else echo "snap.possible=0"; fi
+	while IFS= read -r vol; do
+		if [[ "$vol" == /* ]]; then
+			binds=$((binds + 1))
+			continue
+		fi
+		st="${vol%%:*}"
+		[[ -n "$st" && -z "${seen[$st]:-}" ]] || continue
+		seen[$st]=1
+		line="$(pvesm status --storage "$st" 2>/dev/null | awk 'NR==2{gsub("%","",$7); print $2, $7}')"
+		echo "snap.storage=${st} ${line:-? -1}"
+	done < <(sed -n '/^\[/q;s/^\(rootfs\|mp[0-9]\+\): *\([^,]*\).*/\2/p' "$conf")
+	echo "snap.bind=${binds}"
+	pvesh get "/nodes/${NODE}/lxc/${VMID}/snapshot" --output-format json 2>/dev/null | perl -MJSON::PP -e '
+		binmode STDOUT, ":encoding(UTF-8)";
+		local $/;
+		my $d = eval { JSON::PP->new->utf8->decode(<STDIN>) };
+		$d = [] unless ref $d eq "ARRAY";
+		my $other = 0;
+		for my $s (sort { ($a->{snaptime} // 0) <=> ($b->{snaptime} // 0) } @$d) {
+			next if !defined $s->{name} || $s->{name} eq "current";
+			if ($s->{name} =~ /^pw-[0-9]{8}-[0-9]{4}-(complet|securite)$/) {
+				my $desc = $s->{description} // "";
+				$desc =~ s/[\x00-\x1f]+/ /g;
+				printf "snap.pw=%s %d %s\n", $s->{name}, $s->{snaptime} // 0, $desc;
+			} else {
+				$other++;
+			}
+		}
+		print "snap.other=$other\n";'
+}
+
+snap_exists() { snap_info | grep -q "^snap\.pw=${SNAP} "; }
+
+# snap_check : le snapshot $SNAP peut-il être pris ? (aucune modification)
+snap_check() {
+	local info st typ pct ok=1
+	info="$(snap_info)"
+	if ! grep -qx 'snap.possible=1' <<<"$info"; then
+		echo "PW-ERREUR: snapshot impossible : le stockage de ce CT ne le permet pas ($(sed -n 's/^snap\.storage=\([^ ]*\) \([^ ]*\).*/\1 : \2/p' <<<"$info" | paste -sd, -)). Stockages compatibles : LVM-thin, ZFS, Ceph RBD, Btrfs"
+		return 40
+	fi
+	while read -r st typ pct; do
+		if ! [[ "$pct" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+			echo "PW-ERREUR: remplissage du stockage ${st} inconnu (pvesm status) : snapshot refusé"
+			return 41
+		fi
+		if awk -v p="$pct" -v m="$MAXPCT" 'BEGIN{exit !(p >= m)}'; then
+			echo "PW-ERREUR: stockage ${st} (${typ}) rempli à ${pct} % (seuil : ${MAXPCT} %) : snapshot refusé"
+			return 41
+		fi
+		echo "PW: stockage ${st} (${typ}) rempli à ${pct} % (seuil : ${MAXPCT} %)"
+		ok=0
+	done < <(sed -n 's/^snap\.storage=//p' <<<"$info")
+	if [[ "$ok" == 1 ]]; then
+		echo "PW-ERREUR: aucun stockage trouvé pour ce CT : snapshot refusé"
+		return 41
+	fi
+	if grep -q "^snap\.pw=${SNAP} " <<<"$info"; then
+		echo "PW-ERREUR: le snapshot ${SNAP} existe déjà"
+		return 42
+	fi
+	if grep -q '^snap\.bind=[1-9]' <<<"$info"; then
+		echo "PW: attention : les points de montage liés à l'hôte (bind mounts) ne font pas partie du snapshot"
+	fi
+	echo "PW: snapshot ${SNAP} possible"
+	return 0
+}
+
+desc_decode() {
+	local s="$1"
+	[[ "$s" == - ]] && return 0
+	s="${s//-/+}"
+	s="${s//_//}"
+	while ((${#s} % 4)); do s+="="; done
+	base64 -d <<<"$s" 2>/dev/null | tr -d '\000-\037' | head -c 400
+}
+
+run_snapshot() {
+	local desc old rc
+	snap_check
+	rc=$?
+	((rc == 0)) || exit "$rc"
+	desc="$(desc_decode "$DESC64")"
+	[[ -n "$desc" ]] || desc="PatchWarden"
+	log "lxc-snapshot ${VMID} ${SNAP}"
+	echo "PW: création du snapshot ${SNAP}"
+	if ! pct snapshot "$VMID" "$SNAP" --description "$desc" </dev/null; then
+		echo "PW-ERREUR: pct snapshot a échoué : mise à jour annulée"
+		exit 43
+	fi
+	echo "PW: snapshot ${SNAP} créé"
+	# Rétention : les KEEP plus récents snapshots PatchWarden, le nouveau compris
+	# (le nom commence par la date : l'ordre alphabétique est l'ordre chronologique).
+	while IFS= read -r old; do
+		[[ "$old" =~ $PW_SNAP_RE && "$old" != "$SNAP" ]] || continue
+		if pct delsnapshot "$VMID" "$old" </dev/null; then
+			echo "PW: ancien snapshot ${old} supprimé (rétention : ${KEEP})"
+			log "lxc-snapshot ${VMID} : ${old} supprimé (rétention)"
+		else
+			echo "PW-ALERTE: suppression de l'ancien snapshot ${old} impossible"
+		fi
+	done < <(snap_info | sed -n 's/^snap\.pw=\([^ ]*\) .*/\1/p' | sort -r | tail -n +$((KEEP + 1)))
+	snap_info
+}
+
+run_snapdel() {
+	if ! snap_exists; then
+		echo "PW-ERREUR: snapshot ${SNAP} introuvable sur le CT ${VMID}"
+		exit 44
+	fi
+	log "lxc-snapdel ${VMID} ${SNAP}"
+	if ! pct delsnapshot "$VMID" "$SNAP" </dev/null; then
+		echo "PW-ERREUR: pct delsnapshot a échoué"
+		exit 45
+	fi
+	echo "PW: snapshot ${SNAP} supprimé"
+	snap_info
+}
+
+run_rollback() {
+	local before after
+	if ! snap_exists; then
+		echo "PW-ERREUR: snapshot ${SNAP} introuvable sur le CT ${VMID}"
+		exit 44
+	fi
+	before="$(pct status "$VMID" 2>/dev/null)"
+	echo "PW: état avant : ${before#status: }"
+	echo "PW: retour au snapshot ${SNAP} (le CT est arrêté pendant l'opération)"
+	log "lxc-rollback ${VMID} ${SNAP}"
+	if ! pct rollback "$VMID" "$SNAP" </dev/null; then
+		echo "PW-ERREUR: pct rollback a échoué"
+		exit 45
+	fi
+	echo "PW: retour au snapshot ${SNAP} terminé"
+	if [[ "$before" == "status: running" && "$(pct status "$VMID" 2>/dev/null)" != "status: running" ]]; then
+		echo "PW: redémarrage du CT (il tournait avant)"
+		if ! pct start "$VMID" </dev/null; then
+			echo "PW-ERREUR: le CT n'a pas redémarré : démarrez-le à la main"
+			exit 46
+		fi
+	fi
+	after="$(pct status "$VMID" 2>/dev/null)"
+	echo "PW: état après : ${after#status: }"
+	snap_info
 }
 
 case "$VERB" in
@@ -420,11 +624,14 @@ ping)
 lxc-detect)
 	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-detect <vmid> <0|1>"
 	[[ "${ARGS[2]}" =~ ^[01]$ ]] || refuse "rafraîchissement attendu : 0 ou 1"
-	check_ct "${ARGS[1]}"
-	log "lxc-detect ${ARGS[1]} refresh=${ARGS[2]}"
-	timeout "$TIMEOUT_DETECT" pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[2]}" <<<"${SECSRC}
+	VMID="${ARGS[1]}"
+	check_ct "$VMID"
+	log "lxc-detect ${VMID} refresh=${ARGS[2]}"
+	timeout "$TIMEOUT_DETECT" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" <<<"${SECSRC}
 ${DETECT}"
-	exit $?
+	rc=$?
+	snap_info
+	exit "$rc"
 	;;
 lxc-versions)
 	[[ ${#ARGS[@]} -ge 3 && ${#ARGS[@]} -le 12 ]] || refuse "usage : lxc-versions <vmid> <app> (1 à 10 noms)"
@@ -456,6 +663,35 @@ lxc-cs-update)
 	VMID="${ARGS[1]}"
 	check_ct "$VMID"
 	run_detached cs-update run_cs_update
+	;;
+lxc-snapshot)
+	[[ ${#ARGS[@]} -eq 7 ]] || refuse "usage : lxc-snapshot <vmid> <nom> <garder> <seuil_pct> <0|1> <description>"
+	[[ "${ARGS[2]}" =~ $PW_SNAP_RE ]] || refuse "nom de snapshot PatchWarden attendu (pw-AAAAMMJJ-HHMM-action) : ${ARGS[2]}"
+	[[ "${ARGS[3]}" =~ ^[1-9]$ ]] || refuse "nombre de snapshots à garder : 1 à 9"
+	[[ "${ARGS[4]}" =~ ^[1-9][0-9]?$ ]] || refuse "seuil de remplissage : 1 à 99 %"
+	[[ "${ARGS[5]}" =~ ^[01]$ ]] || refuse "vérification seule attendue : 0 ou 1"
+	[[ "${ARGS[6]}" =~ ^(-|[A-Za-z0-9_-]{1,440})$ ]] || refuse "description : base64url ou - attendu"
+	VMID="${ARGS[1]}" SNAP="${ARGS[2]}" KEEP="${ARGS[3]}" MAXPCT="${ARGS[4]}" DESC64="${ARGS[6]}"
+	check_ct "$VMID"
+	if [[ "${ARGS[5]}" == 1 ]]; then
+		snap_check
+		exit $?
+	fi
+	run_detached snapshot run_snapshot
+	;;
+lxc-snapdel)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-snapdel <vmid> <nom>"
+	[[ "${ARGS[2]}" =~ $PW_SNAP_RE ]] || refuse "seuls les snapshots PatchWarden (pw-…) peuvent être supprimés : ${ARGS[2]}"
+	VMID="${ARGS[1]}" SNAP="${ARGS[2]}"
+	check_ct_exists "$VMID"
+	run_detached snapdel run_snapdel
+	;;
+lxc-rollback)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-rollback <vmid> <nom>"
+	[[ "${ARGS[2]}" =~ $PW_SNAP_RE ]] || refuse "retour arrière limité aux snapshots PatchWarden (pw-…) : ${ARGS[2]}"
+	VMID="${ARGS[1]}" SNAP="${ARGS[2]}"
+	check_ct_exists "$VMID"
+	run_detached rollback run_rollback
 	;;
 *)
 	refuse "verbe inconnu : ${VERB}"

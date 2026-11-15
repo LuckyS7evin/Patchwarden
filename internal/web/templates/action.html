@@ -40,14 +40,27 @@
     <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="launch-box">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <input type="hidden" name="simulation" value="1">
+      {{if .Snap.Possible}}<input type="hidden" name="snapshot" value="1">{{end}}
       <h3>1. Simuler</h3>
-      <p class="muted small">apt en simulation (<code>apt-get -s</code>) ; l'update community-scripts n'a pas de mode simulation : il est seulement décrit. Rien n'est modifié.</p>
+      <p class="muted small">apt en simulation (<code>apt-get -s</code>) ; l'update community-scripts n'a pas de mode simulation : il est seulement décrit.{{if .Snap.Possible}} Vérifie aussi que le snapshot serait accepté.{{end}} Rien n'est modifié.</p>
       <button type="submit" class="btn btn-secondary">Simuler</button>
     </form>
     <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="launch-box apply">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <input type="hidden" name="simulation" value="0">
       <h3>2. Appliquer</h3>
+      <div class="snapbox">
+      {{if .Snap.Possible}}
+        <label class="check"><input type="checkbox" name="snapshot" value="1" {{if .Snap.Checked}}checked{{end}}> <span>Prendre un snapshot avant la mise à jour</span></label>
+        <p class="muted small"><code>{{.Snap.Name}}</code> (horodaté au lancement) · {{.Snap.Reason}}<br>
+          {{.Snap.Storage}}. Si le snapshot échoue, la mise à jour est annulée.
+          {{if .Snap.Removed}}<br>Rétention : {{join .Snap.Removed ", "}} sera supprimé.{{end}}
+          {{if .Snap.Binds}}<br>Les points de montage liés à l'hôte ne font pas partie du snapshot.{{end}}</p>
+      {{else}}
+        <label class="check is-disabled"><input type="checkbox" disabled> <span>Snapshot avant la mise à jour</span></label>
+        <p class="small crit">Impossible : {{.Snap.Why}}</p>
+      {{end}}
+      </div>
       <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : appliquer « {{.Action.Label}} » à <strong>{{.Guest.Name}}</strong></label>
       {{if .NeedName}}
       <label>Invité critique : saisissez son nom (<code>{{.Guest.Name}}</code>)
@@ -57,7 +70,6 @@
       <button type="submit" class="btn btn-danger">Appliquer</button>
     </form>
   </div>
-  <p class="muted small">Pas de snapshot automatique pour l'instant (prochain jalon) : pensez à votre sauvegarde PBS ou à un snapshot manuel pour les invités sensibles.</p>
 </section>
 {{end}}
 {{end}}

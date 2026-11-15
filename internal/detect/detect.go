@@ -120,6 +120,7 @@ type Result struct {
 	Docker         bool      `json:"docker"`
 	Containers     int       `json:"containers"`
 	Apps           []App     `json:"apps,omitempty"`
+	Snap           SnapInfo  `json:"snap"`
 }
 
 // AppUpdates compte les applis avec une version plus récente.
@@ -210,6 +211,7 @@ func Parse(lines []string) (Result, error) {
 		return r, ErrIncomplete
 	}
 	r.Apt.reconcileSecurity()
+	r.Snap, _ = ParseSnap(lines)
 	return r, nil
 }
 
@@ -367,6 +369,10 @@ func (s *Store) Put(key string, r Result) error {
 	defer s.mu.Unlock()
 	carrySince(s.m[key], &r)
 	s.m[key] = r
+	return s.saveLocked()
+}
+
+func (s *Store) saveLocked() error {
 	b, err := json.Marshal(s.m)
 	if err != nil {
 		return err

@@ -39,6 +39,9 @@ type Engine struct {
 	// Notify (facultatif) et PublicURL : notifications et liens.
 	Notify    *notify.Hub
 	PublicURL string
+	// Snap : section [snapshots] ; SnapPrefs : réglage propre à chaque invité.
+	Snap      SnapConfig
+	SnapPrefs *PrefStore
 }
 
 // Erreurs de refus, affichées telles quelles dans l'interface.
@@ -56,7 +59,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 4
+const WrapperVersion = 5
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {

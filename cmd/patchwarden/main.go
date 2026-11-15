@@ -176,6 +176,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("réponses aux questions des scripts : %w", err)
 	}
+	snapPrefs, err := engine.OpenPrefs(cfg.Jobs.DataDir, "snapshots.json")
+	if err != nil {
+		return fmt.Errorf("réglages de snapshot des invités : %w", err)
+	}
 	hostname, _ := os.Hostname()
 	up := upstream.New(cfg.Upstream.GitHubToken, cfg.Upstream.CacheTTL.Duration, nil)
 	up.GitHubAPI = strings.TrimRight(cfg.Upstream.GitHubAPI, "/")
@@ -191,6 +195,8 @@ func serve(args []string) error {
 		Hostname:   hostname,
 		Notify:     notify.New(cfg.Notify, nil, log),
 		PublicURL:  cfg.Server.PublicURL,
+		Snap:       engine.SnapConfig{Default: cfg.Snapshots.Default, Keep: cfg.Snapshots.Keep, MaxPct: cfg.Snapshots.MaxStoragePct},
+		SnapPrefs:  snapPrefs,
 	}
 	jm.OnFinish = eng.NotifyJob
 	if cfg.SSH.Enabled() {

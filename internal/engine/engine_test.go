@@ -29,7 +29,17 @@ import (
 // système de fichiers d'invité.
 const fakePct = `#!/bin/bash
 case "$1" in
-status) [ "$2" = 108 ] && echo "status: stopped" || echo "status: running" ;;
+status) if [ "$2" = 108 ] || [ -e "$FAKE_GUEST/stopped" ]; then echo "status: stopped"; else echo "status: running"; fi ;;
+snapshot)
+	# pct snapshot <vmid> <nom> --description <texte>
+	echo "pct snapshot $2 $3" >> "$PCT_SET_LOG"
+	[ -n "$FAKE_SNAP_FAIL" ] && { echo "snapshot feature is not available" >&2; exit 1; }
+	echo "$3 $(date +%s) $5" >> "$FAKE_GUEST/snaps"; exit 0 ;;
+delsnapshot)
+	echo "pct delsnapshot $2 $3" >> "$PCT_SET_LOG"
+	grep -v "^$3 " "$FAKE_GUEST/snaps" > "$FAKE_GUEST/snaps.tmp"; mv "$FAKE_GUEST/snaps.tmp" "$FAKE_GUEST/snaps"; exit 0 ;;
+rollback) echo "pct rollback $2 $3" >> "$PCT_SET_LOG"; touch "$FAKE_GUEST/stopped"; exit 0 ;;
+start) echo "pct start $2" >> "$PCT_SET_LOG"; rm -f "$FAKE_GUEST/stopped"; exit 0 ;;
 set)
 	shift 2; echo "pct set $*" >> "$PCT_SET_LOG"
 	# Comme Proxmox : la mémoire est vue tout de suite par le CT, les CPU
@@ -64,6 +74,26 @@ $script"
 	# l'entrée standard sans redirection consommerait la suite du script.
 	printf '%s\n' "$script" | exec bash -s -- "$@" ;;
 esac
+`
+
+// Faux pvesh : possibilité de snapshot (FAKE_SNAP_FEATURE) et liste des
+// snapshots tenue par le faux pct dans $FAKE_GUEST/snaps (« nom date description »).
+const fakePvesh = `#!/bin/bash
+case "$2" in
+*/feature) if [ "${FAKE_SNAP_FEATURE:-1}" = 1 ]; then echo '{"hasFeature":1,"nodes":["loki"]}'; else echo '{"hasFeature":0}'; fi ;;
+*/snapshot) perl -MJSON::PP -e '
+	my @a;
+	if (open my $f, "<", $ARGV[0]) { while (<$f>) { chomp; my ($n, $t, $d) = split / /, $_, 3; push @a, {name => $n, snaptime => $t + 0, description => $d // ""}; } }
+	push @a, {name => "current", running => 1};
+	print JSON::PP->new->encode(\@a);' "$FAKE_GUEST/snaps" ;;
+*) exit 1 ;;
+esac
+`
+
+// Faux pvesm : remplissage du stockage (FAKE_STORAGE_PCT).
+const fakePvesm = `#!/bin/bash
+echo "Name Type Status Total Used Available %"
+echo "$3 lvmthin active 100 45 55 ${FAKE_STORAGE_PCT:-45.00}%"
 `
 
 const fakeApt = `#!/bin/bash
@@ -128,7 +158,7 @@ func setup(t *testing.T) *env {
 		}
 	}
 	for _, id := range []string{"104", "108"} {
-		if err := os.WriteFile(filepath.Join(pve, "nodes", "loki", "lxc", id+".conf"), []byte("cores: 2\nmemory: 2048\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(pve, "nodes", "loki", "lxc", id+".conf"), []byte("cores: 2\nmemory: 2048\nrootfs: local-lvm:vm-"+id+"-disk-0,size=8G\nmp0: /srv/partage,mp=/partage\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -141,6 +171,10 @@ func setup(t *testing.T) *env {
 	writeExec(t, filepath.Join(bin, "update"), fakeUpdate)
 	writeExec(t, filepath.Join(bin, "pct"), fakePct)
 	writeExec(t, filepath.Join(bin, "apt-get"), fakeApt)
+	writeExec(t, filepath.Join(bin, "pvesh"), fakePvesh)
+	writeExec(t, filepath.Join(bin, "pvesm"), fakePvesm)
+	// Un snapshot manuel, que PatchWarden ne doit jamais toucher.
+	_ = os.WriteFile(filepath.Join(guest, "snaps"), []byte("avant-maj 1700000000 snapshot manuel\n"), 0o644)
 	writeExec(t, filepath.Join(bin, "hostname"), "#!/bin/sh\necho loki\n")
 	writeExec(t, filepath.Join(bin, "logger"), "#!/bin/sh\nexit 0\n")
 
@@ -201,6 +235,10 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	prefs, err := OpenPrefs(data, "snapshots.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	up := upstream.New("", time.Hour, web.Client())
 	up.GitHubAPI = web.URL + "/gh"
 	nodes := map[string]string{"loki": srv.Addr}
@@ -210,6 +248,7 @@ func setup(t *testing.T) *env {
 		Scripts: cs.NewFetcher([]string{base}, time.Hour, web.Client()), Upstream: up,
 		Website: "https://community-scripts.org", AptRefresh: true, Timeout: time.Minute, Log: log,
 		Answers: answers, SelfGuest: "loki/103",
+		Snap: SnapConfig{Keep: 1, MaxPct: 90}, SnapPrefs: prefs,
 	}
 	return &env{eng: eng, server: srv, base: base, web: web, root: root, guest: inventory.Guest{Node: "loki", Type: "lxc", VMID: 104, Name: "termix", Status: "running", CommunityScript: true}}
 }

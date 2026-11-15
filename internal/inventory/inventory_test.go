@@ -127,6 +127,16 @@ func TestNodeStats(t *testing.T) {
 	if !st.Online || st.CPUPct() != 23 || st.MemPct() != 60 || st.Storage != "local-lvm" || st.StoragePct() != 82 || st.StorageType != "lvmthin" {
 		t.Errorf("état du nœud : %+v", st)
 	}
+	if s, ok := st.PickStorage(map[string]bool{"local-lvm": true}); !ok || s.Name != "local-lvm" {
+		t.Errorf("stockage choisi : %+v", s)
+	}
+	st.Storages = append(st.Storages, StorageStat{Name: "omv-data", Type: "lvm", Used: 99, Total: 100})
+	if s, _ := st.PickStorage(map[string]bool{"local-lvm": true}); s.Name != "local-lvm" {
+		t.Errorf("un stockage réservé à une VM ne doit pas l'emporter : %+v", s)
+	}
+	if s, _ := st.PickStorage(nil); s.Name != "local-lvm" {
+		t.Errorf("repli : %+v", s)
+	}
 	if len(snap.Guests) != 1 {
 		t.Errorf("les nœuds et stockages ne sont pas des invités : %+v", snap.Guests)
 	}

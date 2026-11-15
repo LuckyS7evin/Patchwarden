@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 )
 
@@ -25,6 +26,27 @@ type nodeView struct {
 	Addr    string // adresse SSH, sans le port 22
 	Stat    inventory.NodeStat
 	HasStat bool
+	Storage inventory.StorageStat // stockage des disques des invités
+	HasStor bool
+}
+
+// storagesInUse : par nœud, les stockages qui portent des disques de LXC
+// détectés (lus par le wrapper à chaque détection).
+func storagesInUse(all map[string]detect.Result) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for key, d := range all {
+		node, _, ok := strings.Cut(key, "/")
+		if !ok {
+			continue
+		}
+		for _, st := range d.Snap.Storages {
+			if out[node] == nil {
+				out[node] = map[string]bool{}
+			}
+			out[node][st.Name] = true
+		}
+	}
+	return out
 }
 
 // shell : ce que le cadre commun affiche sur chaque page connectée.
@@ -61,13 +83,15 @@ func (s *Server) shellFor() shell {
 			}
 		}
 	}
+	inUse := storagesInUse(all)
 	for _, n := range snap.Nodes() {
 		st, ok := snap.NodeStats[n]
+		stor, hasStor := st.PickStorage(inUse[n])
 		addr := s.cfg.SSH.Nodes[n]
 		if h, p, err := net.SplitHostPort(addr); err == nil && p == "22" {
 			addr = h
 		}
-		sh.Nodes = append(sh.Nodes, nodeView{Name: n, Addr: addr, Stat: st, HasStat: ok && (st.MemTotal > 0 || st.StorageTotal > 0)})
+		sh.Nodes = append(sh.Nodes, nodeView{Name: n, Addr: addr, Stat: st, HasStat: ok && (st.MemTotal > 0 || hasStor), Storage: stor, HasStor: hasStor})
 	}
 	sort.Slice(sh.Nodes, func(i, j int) bool { return sh.Nodes[i].Name < sh.Nodes[j].Name })
 	if s.deps.NextDetection != nil {

@@ -134,9 +134,10 @@ func (s *Server) snapshotsPage(w http.ResponseWriter, r *http.Request, se *sessi
 		}
 	}
 	sort.SliceStable(d.Rows, func(i, j int) bool { return d.Rows[i].Snap.Time.Before(d.Rows[j].Snap.Time) })
+	inUse := storagesInUse(s.allDetections())
 	for _, n := range snap.Nodes() {
-		if st, ok := snap.NodeStats[n]; ok && st.Storage != "" {
-			d.Storages = append(d.Storages, fmt.Sprintf("%s : %s (%s) %d %%", strings.ToUpper(n), st.Storage, st.StorageType, st.StoragePct()))
+		if stor, ok := snap.NodeStats[n].PickStorage(inUse[n]); ok {
+			d.Storages = append(d.Storages, fmt.Sprintf("%s : %s (%s) %d %%", strings.ToUpper(n), stor.Name, stor.Type, stor.Pct()))
 		}
 	}
 	s.render(w, "snapshots", http.StatusOK, d)

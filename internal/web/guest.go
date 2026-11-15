@@ -23,10 +23,10 @@ type guestData struct {
 	Tabs   []tabLink
 	Jobs   []jobs.Job
 	// Plans : « sécurité uniquement » puis « tout mettre à jour ».
-	Plans    []engine.Plan
+	Plans     []engine.Plan
 	Sec, Full *engine.Plan
-	Answers  []engine.PromptAnswer
-	Missing  int // questions sans réponse enregistrée
+	Answers   []engine.PromptAnswer
+	Missing   int // questions sans réponse enregistrée
 	// Paquets séparés pour l'affichage.
 	SecurityPkgs, OtherPkgs []detect.Package
 	StrictMissing           int

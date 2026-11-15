@@ -67,7 +67,14 @@ svg.bar .bg { fill: var(--line); }
 svg.bar .fg { fill: var(--acc); }
 svg.bar .fg.w { fill: var(--warn); }
 svg.bar .fg.c { fill: var(--crit); }
-.foot { margin-top: auto; color: var(--dim); font-size: 11px; padding: 14px 8px 4px; line-height: 1.6; }
+.acct { margin-top: auto; padding: 14px 6px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.acct .theme { width: 100%; }
+.acct .theme button { flex: 1; }
+.acct .user .uname { color: var(--txt); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct .user .btn.l { padding: 4px 6px; color: var(--mut); }
+.acct .user .btn.l:hover { color: var(--txt); }
+.acct .user .lbl { display: none; }
+.foot { color: var(--dim); font-size: 11px; padding: 10px 8px 4px; line-height: 1.6; }
 .foot a { color: var(--dim); }
 main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .top { height: 56px; flex: none; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 0 24px; background: var(--surf); }
@@ -214,7 +221,7 @@ td.rowact form { display: inline; margin: 0; }
 .df form { margin: 0; display: flex; }
 
 /* ---------- Fiche ---------- */
-.ph { background: var(--surf); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; display: flex; gap: 20px; align-items: center; margin: 4px 0 16px; }
+.ph { background: var(--surf); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center; margin: 4px 0 16px; }
 .ph h1 { font-size: 24px; }
 .ph .acts { display: flex; flex-direction: column; gap: 7px; width: 210px; margin-left: auto; flex: none; }
 .ph .acts form { margin: 0; display: flex; }
@@ -223,7 +230,8 @@ td.rowact form { display: inline; margin: 0; }
 .stats b { color: var(--txt); font-weight: 600; }
 .stats svg { vertical-align: -2px; margin-right: 4px; }
 /* Frise des versions : installée (point gris) → disponible (point coloré). */
-.tracks { margin-top: 12px; display: grid; grid-template-columns: auto auto minmax(80px, 170px) auto auto; gap: 8px 12px; align-items: center; justify-content: start; }
+.tracks { margin-top: 12px; display: grid; grid-template-columns: auto auto minmax(36px, 170px) auto auto; gap: 8px 12px; align-items: center; justify-content: start; max-width: 100%; }
+.trk { display: contents; }
 .tracks .a { color: var(--mut); font-size: 12.5px; }
 .tv { font-family: "JetBrains Mono", monospace; font-size: 13px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .tv i { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); flex: none; }
@@ -320,24 +328,41 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
   .app { flex-direction: column; height: auto; overflow: visible; }
   .side { width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px; border-right: 0; border-bottom: 1px solid var(--line); }
   .side .sec, .side .nodes, .foot { display: none; }
-  .brand { padding: 4px 8px; }
-  .nav { display: flex; flex-wrap: wrap; gap: 2px; }
+  .brand { padding: 4px 8px; order: 1; }
+  .acct { order: 2; margin: 0 0 0 auto; padding: 0; border: 0; flex-direction: row; align-items: center; gap: 8px; }
+  .acct .theme { width: auto; }
+  .acct .theme button { padding: 4px 8px; }
+  .acct .user .uname { display: none; }
+  .nav { order: 3; flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
   .top { padding: 0 12px; height: auto; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
-  .search { flex: 1 1 100%; }
+  .search { flex: 1 1 160px; }
+  .top .sp { display: none; }
   .content { padding: 16px 16px 90px; }
   .it { grid-template-columns: 18px 28px 1fr auto; }
   .it .what, .it .age, .it .chev { display: none; }
   .ph { flex-direction: column; align-items: flex-start; }
+  .ph .phm { flex: none; width: 100%; }
   .ph .acts { width: 100%; margin-left: 0; }
   .task { grid-template-columns: 1fr; }
-  .tracks { grid-template-columns: auto auto 40px auto; }
-  .tracks a { display: none; }
+
   .drawer { width: 100vw; }
 }
 
 /* Compléments */
-.phm { flex: 1; min-width: 0; }
+.phm { flex: 1 1 520px; min-width: 0; }
 .spaced { margin-top: 16px; }
 .ev .t { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 #statut { font-size: 12.5px; padding: 4px 10px; }
 .card .tracks { margin: 0 0 12px; }
+
+/* Frise : une ligne par appli qui passe à la ligne quand la place manque. */
+@media (max-width: 1280px) {
+  .tracks { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+  .trk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .trk .ln { width: 70px; flex: none; }
+  .card.flat .trk .ln { width: 40px; }
+}
+@media (max-width: 760px) {
+  .trk .ln { width: auto; height: auto; background: none; }
+  .trk .ln span { position: static; transform: none; padding: 0; background: none; }
+}

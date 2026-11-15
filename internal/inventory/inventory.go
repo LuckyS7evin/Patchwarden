@@ -53,8 +53,17 @@ func (g Guest) TypeLabel() string {
 	return "VM"
 }
 
-// NodeStat est l'état d'un nœud : charge, mémoire et stockage local des
-// invités le plus rempli.
+// StorageStat est un stockage local d'un nœud pouvant accueillir des disques
+// d'invités (contenu rootdir ou images).
+type StorageStat struct {
+	Name, Type  string
+	Used, Total int64
+}
+
+// Pct renvoie le remplissage en pourcentage entier.
+func (s StorageStat) Pct() int { return pct(s.Used, s.Total) }
+
+// NodeStat est l'état d'un nœud : charge, mémoire et stockages locaux.
 type NodeStat struct {
 	Name     string
 	Online   bool
@@ -62,11 +71,34 @@ type NodeStat struct {
 	CPU      float64
 	MemUsed  int64
 	MemTotal int64
-	// Storage : stockage non partagé accueillant des disques d'invités
-	// (rootdir ou images), le plus rempli.
+	// Storages : stockages non partagés accueillant des disques d'invités.
+	Storages []StorageStat
+	// Storage : le plus rempli d'entre eux (l'interface préfère celui qui
+	// porte réellement les disques des LXC, voir PickStorage).
 	Storage                   string
 	StorageType               string
 	StorageUsed, StorageTotal int64
+}
+
+// PickStorage choisit le stockage à afficher : le plus rempli parmi ceux qui
+// portent des disques d'invités connus (inUse), sinon le plus rempli de tous.
+// Un stockage réservé à une VM (disque de données d'OMV, par exemple) ne
+// fausse ainsi pas l'affichage.
+func (n NodeStat) PickStorage(inUse map[string]bool) (StorageStat, bool) {
+	var best StorageStat
+	found := false
+	for _, s := range n.Storages {
+		if inUse[s.Name] && (!found || s.Pct() > best.Pct()) {
+			best, found = s, true
+		}
+	}
+	if found {
+		return best, true
+	}
+	if n.Storage == "" {
+		return StorageStat{}, false
+	}
+	return StorageStat{Name: n.Storage, Type: n.StorageType, Used: n.StorageUsed, Total: n.StorageTotal}, true
 }
 
 func pct(a, b int64) int {
@@ -215,6 +247,7 @@ func (s *Service) Refresh(ctx context.Context) {
 				}
 				st := next.NodeStats[res.Node]
 				st.Name = res.Node
+				st.Storages = append(st.Storages, StorageStat{Name: res.Storage, Type: res.PluginType, Used: res.Disk, Total: res.MaxDisk})
 				if st.Storage == "" || pct(res.Disk, res.MaxDisk) > st.StoragePct() {
 					st.Storage, st.StorageType, st.StorageUsed, st.StorageTotal = res.Storage, res.PluginType, res.Disk, res.MaxDisk
 				}

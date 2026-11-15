@@ -281,6 +281,7 @@ sinon) plutôt que des encadrés.
 | Lots | Sélection multiple dès maintenant, mais **simulation seulement** ; un invité coché en « sécurité » et en « tout » n'est simulé qu'une fois, en « tout ». Lots réels au jalon 6 |
 | État des nœuds | `/cluster/resources` lu en entier (invités, nœuds, stockages) : mêmes droits `PVEAuditor`. Stockage affiché : le non partagé accueillant des disques d'invités (`rootdir` ou `images`) le plus rempli. Nœud injoignable : dernières valeurs, grisées |
 | Étapes d'une tâche | Déduites du journal par des marqueurs (`▶ lxc-apt`, `pw.apt_rc=`…), mêmes règles côté serveur et dans le navigateur |
+| Retours du 16/11 | Sélecteur de thème et compte en bas du panneau de gauche (en haut sur mobile) ; frise des versions qui passe à la ligne (lien changelog toujours visible) ; stockage d'un nœud : celui qui porte les disques des LXC détectés, pas le plus rempli (TYR affichait le disque de données d'OMV à 99 %) |
 | Réglages | Lecture seule ; secrets jamais affichés (jetons : « défini (masqué) » ou nom de la variable ; URL de notification réduite à l'hôte, le sujet ntfy valant secret) |
 
 ## Questions encore ouvertes

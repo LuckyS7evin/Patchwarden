@@ -631,13 +631,25 @@ func TestShellPreviewSettings(t *testing.T) {
 	h.srv.cfg.Notify = []config.Notify{{Type: "ntfy", URL: "https://ntfy.sh/sujet-tres-secret?auth=jeton", Events: []string{"echec"}}}
 	h.srv.cfg.Proxmox = []config.Endpoint{{Name: "loki", URL: "https://pve:8006", TokenID: "patchwarden@pve!inventaire", TokenSecret: "s3cret-du-jeton"}}
 	snap := h.inv.snap
-	snap.NodeStats = map[string]inventory.NodeStat{"loki": {Name: "loki", Online: true, CPU: .23, MemUsed: 61, MemTotal: 100, Storage: "local-lvm", StorageType: "lvmthin", StorageUsed: 82, StorageTotal: 100}}
+	snap.NodeStats = map[string]inventory.NodeStat{"loki": {Name: "loki", Online: true, CPU: .23, MemUsed: 61, MemTotal: 100,
+		Storage: "omv-data", StorageType: "lvm", StorageUsed: 99, StorageTotal: 100,
+		Storages: []inventory.StorageStat{{Name: "local-lvm", Type: "lvmthin", Used: 82, Total: 100}, {Name: "omv-data", Type: "lvm", Used: 99, Total: 100}}}}
+	// Le stockage affiché est celui des disques des LXC, pas le disque de données d'une VM.
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, Snap: detect.SnapInfo{Known: true, Storages: []detect.StorageUse{{Name: "local-lvm", Type: "lvmthin", UsedPct: 82}}}})
 	h.inv.snap = snap
 	h.login()
 	_, body := h.do("GET", "/inventaire", nil, nil)
 	for _, want := range []string{"Stockage", "82 %", `class="fg w" width="82"`, "23 %"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("menu des nœuds sans %q", want)
+		}
+	}
+	if strings.Contains(body, "99 %") {
+		t.Error("le stockage réservé à une VM ne doit pas être affiché")
+	}
+	for _, want := range []string{`class="acct"`, `data-theme-set="dark"`, "Se déconnecter"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("panneau de gauche sans %q", want)
 		}
 	}
 	if strings.Contains(body, "style=") {

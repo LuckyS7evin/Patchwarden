@@ -610,10 +610,11 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 		d.Views = append(d.Views, view{Key: v.key, Label: v.label, Count: counts[i], Current: v.key == f.View, URL: f.query(v.key)})
 	}
 	best := -1
-	for _, st := range snap.NodeStats {
-		if st.Storage != "" && st.StoragePct() > best {
-			best = st.StoragePct()
-			d.K.Storage, d.K.StoragePct = st.Storage+" ("+st.Name+")", best
+	inUse := storagesInUse(s.allDetections())
+	for n, st := range snap.NodeStats {
+		if stor, ok := st.PickStorage(inUse[n]); ok && stor.Pct() > best {
+			best = stor.Pct()
+			d.K.Storage, d.K.StoragePct = stor.Name+" ("+n+")", best
 		}
 	}
 	for _, n := range d.Nodes {

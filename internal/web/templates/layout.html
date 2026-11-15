@@ -30,13 +30,28 @@
       <div class="bars">
         <span>CPU</span>{{bar .Stat.CPUPct}}<span>{{.Stat.CPUPct}} %</span>
         <span>RAM</span>{{bar .Stat.MemPct}}<span>{{.Stat.MemPct}} %</span>
-        {{if .Stat.Storage}}<span title="{{.Stat.Storage}} ({{.Stat.StorageType}})">Stockage</span>{{bar .Stat.StoragePct}}<span>{{.Stat.StoragePct}} %</span>{{end}}
+        {{if .HasStor}}<span title="{{.Storage.Name}} ({{.Storage.Type}}) : disques des invités">Stockage</span>{{bar .Storage.Pct}}<span title="{{.Storage.Name}}">{{.Storage.Pct}} %</span>{{end}}
       </div>
       {{end}}
     </div>
   {{end}}
   </div>
   {{end}}
+  <div class="acct">
+    <div class="theme" role="group" aria-label="Thème">
+      <button type="button" data-theme-set="auto" hidden>Auto</button>
+      <button type="button" data-theme-set="light" hidden>Clair</button>
+      <button type="button" data-theme-set="dark" hidden>Sombre</button>
+    </div>
+    <div class="user">
+      <span class="av" aria-hidden="true">{{initials .User}}</span>
+      <span class="uname">{{.User}}</span>
+      <form method="post" action="/deconnexion">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button type="submit" class="btn l" title="Se déconnecter" aria-label="Se déconnecter"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/></svg><span class="lbl">Se déconnecter</span></button>
+      </form>
+    </div>
+  </div>
   <div class="foot">
     {{with .Shell.NextDetection}}Prochaine détection : {{.}}<br>{{end}}
     PatchWarden {{.Version}}<br>
@@ -51,24 +66,12 @@
       <span class="kbd" aria-hidden="true">/</span>
     </form>
     <span class="sp"></span>
-    <div class="theme" role="group" aria-label="Thème">
-      <button type="button" data-theme-set="auto" hidden>Auto</button>
-      <button type="button" data-theme-set="light" hidden>Clair</button>
-      <button type="button" data-theme-set="dark" hidden>Sombre</button>
-    </div>
     {{if .Shell.Detectable}}
     <form method="post" action="/inventaire/detecter">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit" class="btn p" title="Lecture seule : apt-get update et simulation dans chaque LXC démarré">Détecter tout ({{.Shell.Detectable}})</button>
     </form>
     {{end}}
-    <div class="user">
-      <span class="av" title="{{.User}}">{{initials .User}}</span>
-      <form method="post" action="/deconnexion">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <button type="submit" class="btn l">Se déconnecter</button>
-      </form>
-    </div>
   </header>
   <div class="body">
 {{block "content" .}}{{end}}

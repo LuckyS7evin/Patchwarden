@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 3) :
+# Verbes (version 4) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -22,7 +22,9 @@
 #                                          <réponses> : « - » ou y/n/_ séparés par des points
 #                                          (une ligne par question, _ = Entrée) ; <cpu>/<ram_mo> :
 #                                          minimum exigé par le script (0 = rien), appliqué
-#                                          temporairement puis restauré, même en cas d'échec.
+#                                          temporairement puis restauré, même en cas d'échec ;
+#                                          update n'est lancé qu'une fois les ressources
+#                                          visibles dans le CT (code 32 sinon).
 #
 # Codes de sortie : 0 succès, 2 requête refusée, 3 invité non démarré,
 # autre : code renvoyé par la commande exécutée dans l'invité.
@@ -31,7 +33,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=3
+WRAPPER_VERSION=4
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -41,6 +43,9 @@ TIMEOUT_UPDATE=3600
 PVE_DIR="${PATCHWARDEN_PVE_DIR:-/etc/pve}"
 LOG_DIR="${PATCHWARDEN_LOG_DIR:-/var/log/patchwarden}"
 LOCK_DIR="${PATCHWARDEN_LOCK_DIR:-/run/lock}"
+# Attente maximale (s) et intervalle (s) pour que le CT voie ses ressources augmentées.
+RES_WAIT="${PATCHWARDEN_RES_WAIT:-60}"
+RES_POLL="${PATCHWARDEN_RES_POLL:-2}"
 SELF="$(readlink -f "$0")"
 # « --detache » : relance locale par run_detached ; jamais accessible à la clé
 # SSH, dont la commande forcée ne transmet aucun argument.
@@ -264,6 +269,11 @@ APTRUN_EOF
 # repéré puis suivi en direct ; la sortie standard de `update` (bannière,
 # erreurs précoces) est affichée à la fin.
 # ------------------------------------------------------------------------------
+read -r -d '' SEEN <<'SEEN_EOF'
+# Ressources vues depuis le CT, mesurées comme le fait le script community-scripts.
+echo "pw.seen=$(nproc 2>/dev/null || echo 0) $(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)" </dev/null
+SEEN_EOF
+
 read -r -d '' CSUPDATE <<'CSUPDATE_EOF'
 ANS="$1"
 if [ ! -x /usr/bin/update ]; then echo "PW-ERREUR: /usr/bin/update absent"; exit 30; fi
@@ -354,9 +364,34 @@ run_cs_update() {
 		[[ "$new_cores" != "$ORIG_CORES" ]] && args+=(--cores "$new_cores")
 		pct set "$VMID" "${args[@]}" || { echo "PW-ERREUR: augmentation des ressources impossible"; exit 31; }
 		log "lxc-cs-update ${VMID} : ressources portées à ${new_cores:-tous les} CPU / ${new_mem} Mo"
+		wait_resources "$new_cores" "$new_mem" || exit 32
 	fi
 	log "lxc-cs-update ${VMID} réponses=${ARGS[2]} cpu=${ARGS[3]} ram=${ARGS[4]}"
 	timeout "$TIMEOUT_UPDATE" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" <<<"$CSUPDATE"
+}
+
+# pct set écrit la configuration tout de suite, mais le nombre de CPU d'un CT
+# démarré n'est appliqué (cpuset) qu'au passage suivant de pvestatd, toutes les
+# 10 s. Le script community-scripts mesure nproc dès son lancement et refuse
+# (code 113) s'il voit encore l'ancienne valeur : attendre que le CT voie les
+# nouvelles ressources. $1 : CPU attendus (vide = tous les cœurs), $2 : Mo.
+wait_resources() {
+	local cpu="$1" mem="$2" start=$SECONDS c m
+	while :; do
+		read -r c m < <(timeout 30 pct exec "$VMID" -- sh -s <<<"$SEEN" 2>/dev/null | sed -n 's/^pw\.seen=//p')
+		[[ "${c:-}" =~ ^[0-9]+$ ]] || c=0
+		[[ "${m:-}" =~ ^[0-9]+$ ]] || m=0
+		if { [[ -z "$cpu" ]] || ((c >= cpu)); } && ((m >= mem)); then
+			echo "PW: ressources vues dans le CT : ${c} CPU / ${m} Mo (après $((SECONDS - start)) s)"
+			return 0
+		fi
+		if ((SECONDS - start >= RES_WAIT)); then
+			echo "PW-ERREUR: après ${RES_WAIT} s, le CT ne voit que ${c} CPU / ${m} Mo (attendu : ${cpu:-tous les} CPU / ${mem} Mo). Le nombre de CPU d'un CT démarré est appliqué par pvestatd : vérifiez « systemctl status pvestatd » sur ${NODE}"
+			log "lxc-cs-update ${VMID} : ressources non visibles dans le CT après ${RES_WAIT} s"
+			return 1
+		fi
+		sleep "$RES_POLL"
+	done
 }
 
 restore_resources() {

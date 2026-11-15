@@ -189,6 +189,15 @@ l'entrée standard ; sans la correction, 7 tests échouent.
   le signale (« le script demande de relancer update ») et il suffit de relancer
   « Tout mettre à jour ».
 - Les délais DNS affichés par les en-têtes curl du script sont sans conséquence.
+- Deuxième passage (vers v26.11.1) : refus du script, code 113, « Current: 2 CPU, 4096MB
+  RAM » alors que le wrapper venait de porter le CT à 4 CPU. Cause (sources pve-container
+  et pve-manager) : `pct set --cores` sur un CT démarré n'écrit que la configuration ;
+  le cpuset est appliqué par `rebalance_lxc_containers` de `pvestatd`, toutes les 10 s.
+  La mémoire, elle, est appliquée tout de suite. Le premier passage avait eu de la chance.
+  Wrapper v4 : après `pct set`, attente (60 s au plus) que `nproc` et `/proc/meminfo` vus
+  depuis le CT atteignent les valeurs demandées ; sinon, code 32, update non lancé,
+  ressources restaurées. Test : le faux `pct` n'applique les CPU qu'après quelques lectures ;
+  sans l'attente, le test reproduit le code 113.
 
 ## Retours sur l'interface (15/11/2026)
 

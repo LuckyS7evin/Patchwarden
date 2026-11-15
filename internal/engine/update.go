@@ -429,6 +429,8 @@ func explainCSUpdate(code int, errs, out []string) error {
 		return errors.New("/usr/bin/update absent de l'invité")
 	case 31:
 		return errors.New("augmentation temporaire des ressources impossible (pct set)")
+	case 32:
+		return errors.New("le CT ne voit pas les ressources augmentées (CPU appliqués par pvestatd sur le nœud) : update non lancé, ressources restaurées")
 	}
 	if code != exitRefused && code != exitNotRunning && code != exitBusy && code != 124 {
 		return fmt.Errorf("update a échoué (code %d) : %s", code, lastMatching(out, "[ERROR]", "✖", "✘", "Error", "error"))

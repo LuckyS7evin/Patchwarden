@@ -258,7 +258,18 @@ nouveaux pour PatchWarden) ; les suivantes ne signalent que ce qui est apparu de
 
 ### Mettre à jour PatchWarden
 
-Remplacez `/usr/local/bin/patchwarden`, puis `systemctl restart patchwarden`. Les sessions
+Dans le LXC où le dépôt est cloné et compilé :
+
+```bash
+cd /root/Patchwarden
+git pull --ff-only
+make build
+install -m 755 bin/patchwarden /usr/local/bin/patchwarden
+systemctl restart patchwarden
+patchwarden check-config      # signale aussi un wrapper trop ancien sur les nœuds
+```
+
+En résumé : remplacez `/usr/local/bin/patchwarden`, puis `systemctl restart patchwarden`. Les sessions
 sont gardées en mémoire : il faudra se reconnecter. Une tâche en cours au moment du
 redémarrage est marquée « interrompue » dans l'historique (une mise à jour, elle, se termine
 sur le nœud : voir son journal dans `/var/log/patchwarden/`).
@@ -280,13 +291,13 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v3) | Effet |
+| Verbe (wrapper v4) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
 | `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
 | `lxc-apt <vmid> <security\|full> <0\|1>` | `apt-get update` puis `apt-get --with-new-pkgs upgrade` (dépôts `*-security` seuls en mode `security`). `1` = simulation (`apt-get -s`), rien n'est modifié |
-| `lxc-cs-update <vmid> <réponses> <cpu> <ram>` | Commande `update` community-scripts sans terminal (`PHS_SILENT=1`), réponses aux questions sur l'entrée standard. Si le CT a moins que `cpu`/`ram` (exigés par le script) : `pct set` temporaire, puis restauration des valeurs d'origine |
+| `lxc-cs-update <vmid> <réponses> <cpu> <ram>` | Commande `update` community-scripts sans terminal (`PHS_SILENT=1`), réponses aux questions sur l'entrée standard. Si le CT a moins que `cpu`/`ram` (exigés par le script) : `pct set` temporaire, attente que le CT voie les nouvelles valeurs (les CPU sont appliqués par `pvestatd`, jusqu'à 10 s), puis restauration des valeurs d'origine |
 
 Les mises à jour réelles tournent **détachées sur le nœud**, sous un verrou par CT : si la
 connexion SSH est perdue (redémarrage de PatchWarden, réseau), l'opération se termine quand

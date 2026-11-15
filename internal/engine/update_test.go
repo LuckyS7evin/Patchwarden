@@ -164,6 +164,50 @@ func TestCSUpdateFailureIsExplained(t *testing.T) {
 	}
 }
 
+// Proxmox n'applique les CPU d'un CT démarré qu'au passage suivant de
+// pvestatd : update ne doit être lancé qu'une fois les CPU vus dans le CT
+// (sinon le script refuse, code 113, comme sur Termix le 15/11/2026).
+func TestCSUpdateWaitsForCPUs(t *testing.T) {
+	e := setup(t)
+	e.detect(t)
+	_ = e.eng.Answers.Set(e.guest.Key(), map[string]string{nginxPrompt: "y"})
+	t.Setenv("FAKE_CPU_LAG", "3")
+	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := wait(t, e.eng.Jobs, j.ID)
+	log := e.logOf(t, j.ID)
+	if done.Status != jobs.Success {
+		t.Fatalf("mise à jour : %+v\n%s", done, log)
+	}
+	if !strings.Contains(log, "ressources vues dans le CT : 4 CPU / 4096 Mo") {
+		t.Errorf("attente des ressources absente :\n%s", log)
+	}
+}
+
+func TestCSUpdateCPUsNeverSeen(t *testing.T) {
+	e := setup(t)
+	e.detect(t)
+	_ = e.eng.Answers.Set(e.guest.Key(), map[string]string{nginxPrompt: "y"})
+	t.Setenv("FAKE_CPU_LAG", "jamais")
+	j, err := e.eng.Execute(e.guest, ActFull, false, "admin", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := wait(t, e.eng.Jobs, j.ID)
+	log := e.logOf(t, j.ID)
+	if done.Status != jobs.Failed || !strings.Contains(done.Error, "pvestatd") {
+		t.Errorf("échec attendu et expliqué : %+v", done)
+	}
+	if strings.Contains(log, "lancement de update") {
+		t.Errorf("update lancé alors que le CT ne voit pas les CPU :\n%s", log)
+	}
+	if !strings.Contains(log, "le CT ne voit que 2 CPU / 4096 Mo") || !strings.Contains(e.pctSets(), "--cores 2 --memory 2048") {
+		t.Errorf("diagnostic ou restauration manquants : %q\n%s", e.pctSets(), log)
+	}
+}
+
 func TestAnswerStore(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := OpenAnswers(dir)

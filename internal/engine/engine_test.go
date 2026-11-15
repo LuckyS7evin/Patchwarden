@@ -30,10 +30,33 @@ import (
 const fakePct = `#!/bin/bash
 case "$1" in
 status) [ "$2" = 108 ] && echo "status: stopped" || echo "status: running" ;;
-set) shift 2; echo "pct set $*" >> "$PCT_SET_LOG"; exit 0 ;;
+set)
+	shift 2; echo "pct set $*" >> "$PCT_SET_LOG"
+	# Comme Proxmox : la mémoire est vue tout de suite par le CT, les CPU
+	# seulement au passage suivant de pvestatd (FAKE_CPU_LAG lectures plus tard,
+	# « jamais » : pvestatd arrêté).
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--memory) echo "MemTotal: $(($2 * 1024)) kB" > "$FAKE_GUEST/proc/meminfo"; shift 2 ;;
+		--cores) echo "$2" > "$FAKE_GUEST/cores.pending"; echo "${FAKE_CPU_LAG:-0}" > "$FAKE_GUEST/cores.lag"; shift 2 ;;
+		*) shift ;;
+		esac
+	done
+	exit 0 ;;
 exec)
 	shift 2; [ "$1" = "--" ] && shift
-	script="$(cat | sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g")"
+	script="$(cat | sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g" -e "s#/proc/meminfo#$FAKE_GUEST/proc/meminfo#g")"
+	# nproc vu depuis le CT : applique les CPU en attente quand le délai est écoulé.
+	script="nproc() {
+		if [ -f \"\$FAKE_GUEST/cores.pending\" ]; then
+			l=\$(cat \"\$FAKE_GUEST/cores.lag\")
+			if [ \"\$l\" = jamais ]; then :
+			elif [ \"\$l\" -le 0 ]; then mv \"\$FAKE_GUEST/cores.pending\" \"\$FAKE_GUEST/cores\"
+			else echo \$((l - 1)) > \"\$FAKE_GUEST/cores.lag\"; fi
+		fi
+		cat \"\$FAKE_GUEST/cores\"
+	}
+$script"
 	shift 2  # « sh -s »
 	[ "$1" = "--" ] && shift
 	# Comme le vrai pct : le script arrive sur l'entrée standard du shell.
@@ -66,6 +89,11 @@ fi
 // moteur (/tmp/create-lxc-*.log), lit une réponse, sort avec FAKE_UPDATE_RC.
 const fakeUpdate = `#!/bin/sh
 echo "BANNIERE"
+# Comme le vrai script : refuse si le CT voit moins que les 4 CPU exigés.
+if [ "$(cat "$FAKE_GUEST/cores")" -lt 4 ]; then
+	echo "Not continuing: LXC is under-provisioned and there is nobody to ask."
+	exit 113
+fi
 L=/tmp/create-lxc-pwtest-$$.log
 echo "[INFO] Updating Termix" > "$L"
 read -r REP
@@ -104,6 +132,12 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
+	// Ressources vues depuis le faux CT : 2 CPU, 2048 Mo.
+	if err := os.MkdirAll(filepath.Join(guest, "proc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(guest, "cores"), []byte("2\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(guest, "proc", "meminfo"), []byte("MemTotal: 2097152 kB\n"), 0o644)
 	writeExec(t, filepath.Join(bin, "update"), fakeUpdate)
 	writeExec(t, filepath.Join(bin, "pct"), fakePct)
 	writeExec(t, filepath.Join(bin, "apt-get"), fakeApt)
@@ -143,6 +177,7 @@ func setup(t *testing.T) *env {
 		cmd.Env = append(os.Environ(),
 			"SSH_ORIGINAL_COMMAND="+command, "PATCHWARDEN_PVE_DIR="+pve, "FAKE_GUEST="+guest,
 			"PATCHWARDEN_LOG_DIR="+filepath.Join(root, "nodelogs"), "PATCHWARDEN_LOCK_DIR="+root, "PCT_SET_LOG="+filepath.Join(root, "pctset.log"),
+			"PATCHWARDEN_RES_WAIT=2", "PATCHWARDEN_RES_POLL=0.1",
 			"PATH="+bin+":"+os.Getenv("PATH"))
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		if err := cmd.Run(); err != nil {

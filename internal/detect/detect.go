@@ -99,7 +99,9 @@ type Apt struct {
 	UpgradeSimple int  `json:"upgrade_simple"`
 	// DistTotal : paquets qu'un dist-upgrade installerait (il peut supprimer
 	// des paquets) ; PatchWarden ne l'utilise jamais.
-	DistTotal      int       `json:"dist_total"`
+	DistTotal int `json:"dist_total"`
+	// DistRemove : paquets qu'un dist-upgrade supprimerait.
+	DistRemove     int       `json:"dist_remove,omitempty"`
 	Packages       []Package `json:"packages"`
 	StrictPackages []string  `json:"strict_packages"`
 }
@@ -125,6 +127,22 @@ type Result struct {
 	// remplacées ; RestartProcs : autres processus dans ce cas (hors service).
 	RestartUnits []string `json:"restart_units,omitempty"`
 	RestartProcs []string `json:"restart_procs,omitempty"`
+	// Special : produit particulier installé dans l'invité (pve, pbs, omv) et sa version.
+	Special        string `json:"special,omitempty"`
+	SpecialVersion string `json:"special_version,omitempty"`
+}
+
+// SpecialLabel renvoie le nom lisible du produit particulier.
+func (r Result) SpecialLabel() string {
+	switch r.Special {
+	case "pve":
+		return "Proxmox VE"
+	case "pbs":
+		return "Proxmox Backup Server"
+	case "omv":
+		return "OpenMediaVault"
+	}
+	return ""
 }
 
 // AppUpdates compte les applis avec une version plus récente.
@@ -199,6 +217,12 @@ func Parse(lines []string) (Result, error) {
 			r.Apt.UpgradeSimple = atoi(v)
 		case "apt.dist_total":
 			r.Apt.DistTotal = atoi(v)
+		case "apt.dist_remove":
+			r.Apt.DistRemove = atoi(v)
+		case "special.kind":
+			r.Special = v
+		case "special.version":
+			r.SpecialVersion = v
 		case "apt.security_repo":
 			r.Apt.SecurityRepo = v == "1"
 		case "apt.strict_pkg":

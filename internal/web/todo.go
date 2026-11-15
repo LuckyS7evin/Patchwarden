@@ -10,6 +10,7 @@ import (
 
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
+	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 )
@@ -67,7 +68,7 @@ func guestLink(g inventory.Guest, tab string) string {
 }
 
 // buildTodo classe ce qui attend une action, du plus urgent au moins urgent.
-func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.Time, isSelf func(inventory.Guest) bool) todo {
+func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.Time, isSelf func(inventory.Guest) bool, osSupport func(detect.Result) eol.Status) todo {
 	var t todo
 	sec := todoGroup{Key: "securite", Title: "Sécurité", Why: "correctifs en attente, les plus anciens d'abord"}
 	major := todoGroup{Key: "majeures", Title: "Versions majeures", Why: "lisez le changelog ; snapshot pré-coché"}
@@ -77,7 +78,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 	maint := todoGroup{Key: "entretien", Title: "Entretien"}
 
 	for _, g := range snap.Guests {
-		if g.Template || g.Type != "lxc" {
+		if g.Template || (g.Type != "lxc" && g.Type != "qemu") {
 			continue
 		}
 		det, ok := all[g.Key()]
@@ -97,7 +98,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 		}
 		self := isSelf != nil && isSelf(g)
 		sel := func(op engine.Op) string {
-			if self || !running || g.Critical {
+			if self || !running || g.Critical || det.Special != "" {
 				return ""
 			}
 			return g.Key() + ":" + string(op)
@@ -178,6 +179,15 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 		for _, sn := range det.Snap.PW {
 			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: "snapshot à supprimer une fois la mise à jour validée", Code: sn.Name, Tag: "snapshot", Since: sn.Time, Link: guestLink(g, "snapshots")})
 		}
+		if osSupport != nil {
+			if st := osSupport(det); st.Level == "crit" || st.Level == "warn" {
+				cls, tag := "w", "fin de support"
+				if st.Level == "crit" {
+					cls, tag = "c", "OS sans support"
+				}
+				maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: st.Name + " : " + st.Text, Tag: tag, TagClass: cls, Link: guestLink(g, "")})
+			}
+		}
 		if !pending && running && now.Sub(det.At) <= StaleDetection {
 			t.OK++
 		}
@@ -225,7 +235,7 @@ func (s *Server) todoPage(w http.ResponseWriter, r *http.Request, se *session) {
 	all := s.allDetections()
 	d := todoData{
 		base:     s.base("À traiter", "traiter", se),
-		Todo:     buildTodo(snap, all, s.now(), s.isSelf),
+		Todo:     buildTodo(snap, all, s.now(), s.isSelf, s.osSupport),
 		Loaded:   !snap.FetchedAt.IsZero(),
 		Detected: len(all) > 0,
 		Error:    r.URL.Query().Get("erreur"),
@@ -268,7 +278,6 @@ func (s *Server) todoPage(w http.ResponseWriter, r *http.Request, se *session) {
 	s.render(w, "traiter", http.StatusOK, d)
 }
 
-
 func hasTag(tags []string, want string) bool {
 	for _, t := range tags {
 		if strings.EqualFold(t, want) {
@@ -276,4 +285,11 @@ func hasTag(tags []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) osSupport(r detect.Result) eol.Status {
+	if s.deps.Engine == nil {
+		return eol.Status{}
+	}
+	return s.deps.Engine.OSSupport(r)
 }

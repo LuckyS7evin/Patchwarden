@@ -97,6 +97,58 @@ case "$2" in
 esac
 `
 
+// Faux qm : statut, agent invité (FAKE_AGENT_DOWN), qm guest exec avec la
+// sortie encodée deux fois comme le vrai (octets lus en latin-1 puis JSON
+// UTF-8), snapshots, retour arrière, redémarrage. Les scripts reçus subissent
+// les mêmes substitutions que dans le faux pct (faux système de fichiers).
+const fakeQm = `#!/bin/bash
+transform() {
+	sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g" \
+		-e "s#/proc/meminfo#$FAKE_GUEST/proc/meminfo#g" -e "s#PROCDIR=/proc#PROCDIR=$FAKE_GUEST/proc#g"
+}
+case "$1" in
+status) [ -e "$FAKE_GUEST/vmstopped" ] && echo "status: stopped" || echo "status: running" ;;
+agent) [ -n "$FAKE_AGENT_DOWN" ] && { echo "QEMU guest agent is not running" >&2; exit 2; }; exit 0 ;;
+guest)
+	shift 3 # guest exec <vmid>
+	pass=0
+	while [ "$1" != "--" ]; do
+		case "$1" in --pass-stdin) pass="$2"; shift 2 ;; --timeout) shift 2 ;; *) shift ;; esac
+	done
+	shift
+	in="$(mktemp)" out="$(mktemp)" err="$(mktemp)"
+	if [ "$pass" = 1 ]; then cat | transform > "$in"; else : > "$in"; fi
+	if [ "$1" = sh ] && [ "$2" = -s ]; then
+		shift 2; [ "$1" = "--" ] && shift
+		bash -s -- "$@" < "$in" > "$out" 2> "$err"
+	else
+		"$@" < "$in" > "$out" 2> "$err"
+	fi
+	rc=$?
+	perl -MJSON::PP -e 'local $/; open my $o, "<", $ARGV[0]; my $od = <$o> // ""; open my $e, "<", $ARGV[1]; my $ed = <$e> // "";
+		print JSON::PP->new->utf8->canonical->encode({exitcode => $ARGV[2] + 0, exited => 1, "out-data" => $od, "err-data" => $ed});' "$out" "$err" "$rc"
+	rm -f "$in" "$out" "$err" ;;
+snapshot) echo "qm snapshot $2 $3" >> "$PCT_SET_LOG"; echo "$3 $(date +%s) $5" >> "$FAKE_GUEST/snaps"; exit 0 ;;
+delsnapshot) echo "qm delsnapshot $2 $3" >> "$PCT_SET_LOG"; grep -v "^$3 " "$FAKE_GUEST/snaps" > "$FAKE_GUEST/snaps.tmp"; mv "$FAKE_GUEST/snaps.tmp" "$FAKE_GUEST/snaps"; exit 0 ;;
+rollback) echo "qm rollback $2 $3" >> "$PCT_SET_LOG"; touch "$FAKE_GUEST/vmstopped"; exit 0 ;;
+start) echo "qm start $2" >> "$PCT_SET_LOG"; rm -f "$FAKE_GUEST/vmstopped"; exit 0 ;;
+reboot) echo "qm reboot $2 $3 $4" >> "$PCT_SET_LOG"; exit 0 ;;
+esac
+`
+
+// Faux dpkg-query : FAKE_SPECIAL = paquet installé (openmediavault, pve-manager…).
+const fakeDpkgQuery = `#!/bin/bash
+p="${@: -1}"
+if [ -n "$FAKE_SPECIAL" ] && [ "$p" = "$FAKE_SPECIAL" ]; then echo "install ok installed 7.4.1-1"; exit 0; fi
+exit 1
+`
+
+// Faux omv-upgrade.
+const fakeOmvUpgrade = `#!/bin/bash
+echo "omv-upgrade : mise à jour et déploiement de la configuration"
+echo "2 upgraded, 0 newly installed, 0 to remove and 0 not upgraded."
+`
+
 // Faux systemctl (dans le CT) : « redémarre » un service en supprimant ses
 // processus du faux /proc.
 const fakeSystemctl = `#!/bin/bash
@@ -127,6 +179,7 @@ if [[ "$*" == *SourceList* ]]; then
 	echo "Inst libssl3t64 [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [amd64])"
 	echo "1 upgraded, 0 newly installed, 0 to remove and 1 not upgraded."
 elif [[ "$*" == *dist-upgrade* || "$*" == *--with-new-pkgs* ]]; then
+	[[ "$*" == *dist-upgrade* && -n "$FAKE_REMOVE" ]] && echo "Remv vieux-paquet [1.0]"
 	echo "Inst base-files [13.8+deb13u6] (13.8+deb13u7 Debian:13.7/stable [amd64])"
 	echo "Inst libssl3t64 [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [amd64])"
 	echo "2 upgraded, 0 newly installed, 0 to remove and 0 not upgraded."
@@ -194,6 +247,16 @@ func setup(t *testing.T) *env {
 	writeExec(t, filepath.Join(bin, "pvesh"), fakePvesh)
 	writeExec(t, filepath.Join(bin, "pvesm"), fakePvesm)
 	writeExec(t, filepath.Join(bin, "systemctl"), fakeSystemctl)
+	writeExec(t, filepath.Join(bin, "qm"), fakeQm)
+	writeExec(t, filepath.Join(bin, "dpkg-query"), fakeDpkgQuery)
+	writeExec(t, filepath.Join(bin, "omv-upgrade"), fakeOmvUpgrade)
+	// VM 403 : un disque sur local-lvm, un CD-ROM, un disque physique en passthrough.
+	if err := os.MkdirAll(filepath.Join(pve, "nodes", "loki", "qemu-server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(pve, "nodes", "loki", "qemu-server", "403.conf"),
+		[]byte("cores: 2\nmemory: 4096\nscsi0: local-lvm:vm-403-disk-0,size=32G\nide2: none,media=cdrom\nscsi1: /dev/disk/by-id/ata-DISQUE,size=4T\n"), 0o644)
+	_ = os.MkdirAll(filepath.Join(guest, "tmp"), 0o755)
 	// Un snapshot manuel, que PatchWarden ne doit jamais toucher.
 	_ = os.WriteFile(filepath.Join(guest, "snaps"), []byte("avant-maj 1700000000 snapshot manuel\n"), 0o644)
 	writeExec(t, filepath.Join(bin, "hostname"), "#!/bin/sh\necho loki\n")
@@ -233,6 +296,7 @@ func setup(t *testing.T) *env {
 			"SSH_ORIGINAL_COMMAND="+command, "PATCHWARDEN_PVE_DIR="+pve, "FAKE_GUEST="+guest,
 			"PATCHWARDEN_LOG_DIR="+filepath.Join(root, "nodelogs"), "PATCHWARDEN_LOCK_DIR="+root, "PCT_SET_LOG="+filepath.Join(root, "pctset.log"),
 			"PATCHWARDEN_RES_WAIT=2", "PATCHWARDEN_RES_POLL=0.1",
+			"PATCHWARDEN_VM_TMP="+filepath.Join(guest, "tmp"), "PATCHWARDEN_VM_POLL=0.1",
 			"PATH="+bin+":"+os.Getenv("PATH"))
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		if err := cmd.Run(); err != nil {
@@ -346,10 +410,10 @@ func TestRefusals(t *testing.T) {
 	if _, err := e.eng.Detect(stopped, "admin"); err != ErrStopped {
 		t.Errorf("invité arrêté : %v", err)
 	}
-	vm := e.guest
-	vm.Type = "qemu"
-	if _, err := e.eng.Detect(vm, "admin"); err != ErrNotLXC {
-		t.Errorf("VM : %v", err)
+	odd := e.guest
+	odd.Type = "autre"
+	if _, err := e.eng.Detect(odd, "admin"); err != ErrNotLXC {
+		t.Errorf("type inconnu : %v", err)
 	}
 	other := e.guest
 	other.Node = "tyr"

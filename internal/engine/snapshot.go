@@ -166,8 +166,9 @@ func (e *Engine) takeSnapshot(ctx context.Context, p Plan, dryRun bool, user str
 	if dryRun {
 		dry = "1"
 	}
-	cmd := fmt.Sprintf("lxc-snapshot %d %s %d %d %s %s", g.VMID, name, cfg.Keep, cfg.MaxPct, dry, desc)
-	log(false, fmt.Sprintf("▶ lxc-snapshot %d %s %d %d %s <description>", g.VMID, name, cfg.Keep, cfg.MaxPct, dry))
+	v := verb(g, "snapshot")
+	cmd := fmt.Sprintf("%s %d %s %d %d %s %s", v, g.VMID, name, cfg.Keep, cfg.MaxPct, dry, desc)
+	log(false, fmt.Sprintf("▶ %s %d %s %d %d %s <description>", v, g.VMID, name, cfg.Keep, cfg.MaxPct, dry))
 	out, errs, code, err := e.run(ctx, g.Node, cmd, log)
 	if err != nil {
 		return name, connLost(err, out)
@@ -202,8 +203,8 @@ func (e *Engine) CanSnapAction(g inventory.Guest) error {
 		return ErrNoSSH
 	case g.Template:
 		return ErrTemplate
-	case g.Type != "lxc":
-		return errors.New("snapshots des VM : prochain jalon")
+	case g.Type != "lxc" && g.Type != "qemu":
+		return ErrNotLXC
 	case g.Stale:
 		return ErrStaleNode
 	case e.HasNode != nil && !e.HasNode(g.Node):
@@ -242,7 +243,7 @@ func (e *Engine) Rollback(g inventory.Guest, name, user, typedName string) (jobs
 		return jobs.Job{}, fmt.Errorf("%w : saisissez exactement le nom de l'invité (%s)", ErrConfirm, g.Name)
 	}
 	return e.Jobs.Submit(jobs.KindRollback, target(g), false, user, func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
-		cmd := fmt.Sprintf("lxc-rollback %d %s", g.VMID, name)
+		cmd := fmt.Sprintf("%s %d %s", verb(g, "rollback"), g.VMID, name)
 		log(false, fmt.Sprintf("Retour du CT %d (%s) sur %s au snapshot %s", g.VMID, g.Name, g.Node, name))
 		log(false, "▶ "+cmd)
 		out, errs, code, err := e.run(ctx, g.Node, cmd, log)
@@ -287,7 +288,7 @@ func (e *Engine) DeleteSnapshot(g inventory.Guest, name, user string, confirmed 
 		return jobs.Job{}, fmt.Errorf("%w : cochez la case de confirmation", ErrConfirm)
 	}
 	return e.Jobs.Submit(jobs.KindSnapDelete, target(g), false, user, func(ctx context.Context, _ jobs.Job, log jobs.Logger) (string, error) {
-		cmd := fmt.Sprintf("lxc-snapdel %d %s", g.VMID, name)
+		cmd := fmt.Sprintf("%s %d %s", verb(g, "snapdel"), g.VMID, name)
 		log(false, "▶ "+cmd)
 		out, errs, code, err := e.run(ctx, g.Node, cmd, log)
 		if err != nil {

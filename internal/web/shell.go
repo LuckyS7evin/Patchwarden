@@ -63,7 +63,7 @@ func (s *Server) shellFor() shell {
 	snap, _ := s.inv.Current()
 	sh.Nav.Guests = len(snap.Guests)
 	all := s.allDetections()
-	t := buildTodo(snap, all, s.now(), s.isSelf)
+	t := buildTodo(snap, all, s.now(), s.isSelf, s.osSupport)
 	sh.Nav.Todo = t.Count
 	sh.Nav.TodoCrit = len(t.Groups) > 0 && t.Groups[0].Key == "securite"
 	for _, d := range all {

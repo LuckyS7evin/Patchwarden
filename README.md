@@ -16,7 +16,7 @@ de mémoire, sans agent dans les invités.
 | 4 | Détection planifiée, notifications (ntfy, Gotify, webhook), vue sécurité | ✅ |
 | 5 | Snapshots avant mise à jour, retour arrière en un clic | ✅ |
 | 6 | Lots, regroupement par tags, redémarrages requis | ✅ |
-| 7 | VMs (guest agent), OMV/PBS, fin de support des OS | à faire |
+| 7 | VMs (guest agent), OMV/PBS, fin de support des OS | ✅ |
 | 8 | Docker (API Portainer) | à faire |
 | 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique, métriques Prometheus | à faire |
 
@@ -69,6 +69,16 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
     « arrêter au premier échec » ; simulation du lot ou application ; les opérations
     s'enchaînent une par une, suivies sur la page du lot ; une seule notification par lot.
     Les invités à confirmation renforcée (OMV, PBS, tag `critique`) restent un par un ;
+  - **VM** (jalon 7) : détection, mises à jour, snapshots, retour arrière et redémarrages
+    par l'agent invité QEMU (`qemu-guest-agent` installé et démarré dans la VM, option
+    « QEMU Guest Agent » activée dans Proxmox) ; message clair si l'agent ne répond pas ;
+  - **produits particuliers**, reconnus dans l'invité : **OpenMediaVault** (« Tout mettre à
+    jour » par `omv-upgrade`), **Proxmox Backup Server** (`apt-get dist-upgrade`, méthode
+    recommandée par Proxmox) : nom à saisir, jamais en lot, refus si un paquet serait
+    supprimé ; un **hôte Proxmox VE** (même dans une VM) n'est jamais mis à jour ni redémarré ;
+  - **fin de support des OS** (Debian, Ubuntu, Alpine) : badge dans l'inventaire, ligne
+    « Support » sur la fiche, alerte dans « À traiter » ; dates d'endoflife.date, rafraîchies
+    une fois par jour (table intégrée sans accès Internet, réglage `[eol]`) ;
   - **redémarrages** : la détection repère les processus qui utilisent encore une
     bibliothèque remplacée par une mise à jour (correctif inactif tant qu'ils tournent) ;
     « Redémarrer les services » (services système exclus) ou « Redémarrer le CT », depuis
@@ -324,7 +334,7 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v7) | Effet |
+| Verbe (wrapper v8) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
@@ -336,6 +346,8 @@ le wrapper, relisible sur le nœud.
 | `lxc-rollback <vmid> <nom>` | `pct rollback` vers un snapshot PatchWarden (`pw-…`) uniquement, puis `pct start` si le CT tournait |
 | `lxc-restart-services <vmid>` | Dans le CT : `systemctl restart` des services encore liés à une bibliothèque remplacée (liste établie dans le CT, jamais transmise par PatchWarden ; dbus, `systemd-*`, sessions et consoles exclus) |
 | `lxc-reboot <vmid>` | `pct reboot` du CT, puis attente qu'il soit de nouveau démarré |
+| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
+| Modes de `*-apt` | `security`, `full`, et pour les produits particuliers `dist` (PBS : `apt-get dist-upgrade`) et `omv` (OpenMediaVault : `omv-upgrade`) ; ces deux modes refusent toute mise à jour qui supprimerait un paquet (code 22) |
 
 Le wrapper refuse de lui-même tout snapshot dont le nom n'est pas `pw-…` : même une instance
 PatchWarden compromise ne pourrait ni supprimer ni restaurer vos snapshots manuels. Il lit
@@ -347,7 +359,8 @@ connexion SSH est perdue (redémarrage de PatchWarden, réseau), l'opération se
 même, ressources restaurées comprises. Leur journal complet reste 30 jours sur le nœud dans
 `/var/log/patchwarden/`. Le wrapper écrit donc sur l'hôte uniquement ce journal et un fichier
 de verrou dans `/run/lock`, et lance `pct set` (ressources), `pct snapshot`,
-`pct delsnapshot`, `pct rollback`, `pct start` et `pct reboot` sur le CT visé ; rien d'autre.
+`pct delsnapshot`, `pct rollback`, `pct start` et `pct reboot` sur le CT visé, ou leurs
+équivalents `qm` pour une VM (plus `qm agent ping` et `qm guest exec`) ; rien d'autre.
 La détection lit aussi, dans le CT, `/proc/*/maps` et `/proc/*/cgroup` pour repérer les
 processus encore liés à une bibliothèque remplacée (lecture seule).
 

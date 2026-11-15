@@ -13,6 +13,7 @@ import (
 
 	"github.com/LuckyS7evin/patchwarden/internal/cs"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
+	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"github.com/LuckyS7evin/patchwarden/internal/notify"
@@ -44,13 +45,20 @@ type Engine struct {
 	SnapPrefs *PrefStore
 	// Batches : lots d'opérations (facultatif).
 	Batches *BatchStore
+	// EOL : fin de support des systèmes (facultatif : table intégrée).
+	EOL *eol.Checker
+}
+
+// OSSupport renvoie l'état du support du système d'un invité détecté.
+func (e *Engine) OSSupport(r detect.Result) eol.Status {
+	return e.EOL.Status(r.OSID, r.OSVersion, time.Now())
 }
 
 // Erreurs de refus, affichées telles quelles dans l'interface.
 var (
 	ErrNoSSH       = errors.New("accès SSH non configuré : PatchWarden est en lecture seule (section [ssh])")
 	ErrNodeNoSSH   = errors.New("nœud absent de [ssh.nodes]")
-	ErrNotLXC      = errors.New("la détection des VM arrive dans un prochain jalon")
+	ErrNotLXC      = errors.New("type d'invité non pris en charge")
 	ErrStopped     = errors.New("invité arrêté : ignoré (aucune action sur les invités arrêtés)")
 	ErrUnknown     = errors.New("état inconnu : le nœud ne publie pas l'état de ses invités (vérifiez pvestatd sur le nœud)")
 	ErrTemplate    = errors.New("modèle : aucune action")
@@ -58,10 +66,12 @@ var (
 	exitRefused    = 2
 	exitNotRunning = 3
 	exitBusy       = 99
+	exitAgent      = 4
+	exitAgentExec  = 5
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 7
+const WrapperVersion = 8
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {
@@ -70,7 +80,7 @@ func (e *Engine) CanDetect(g inventory.Guest) error {
 		return ErrNoSSH
 	case g.Template:
 		return ErrTemplate
-	case g.Type != "lxc":
+	case g.Type != "lxc" && g.Type != "qemu":
 		return ErrNotLXC
 	case g.Status == "unknown" || g.Status == "":
 		return ErrUnknown
@@ -127,7 +137,7 @@ func (e *Engine) detectRun(ctx context.Context, g inventory.Guest, jobID string,
 	if e.AptRefresh {
 		refresh = "1"
 	}
-	cmd := fmt.Sprintf("lxc-detect %d %s", g.VMID, refresh)
+	cmd := fmt.Sprintf("%s %d %s", verb(g, "detect"), g.VMID, refresh)
 	log(false, fmt.Sprintf("▶ %s · CT %d (%s) sur %s", cmd, g.VMID, g.Name, g.Node))
 	if e.AptRefresh {
 		log(false, "  (apt-get update est lancé dans l'invité : il rafraîchit l'index des paquets, sans rien installer)")
@@ -144,7 +154,9 @@ func (e *Engine) detectRun(ctx context.Context, g inventory.Guest, jobID string,
 		return detect.Result{}, err
 	}
 	res.At, res.JobID = time.Now(), jobID
-	e.enrichCS(ctx, g, &res, log)
+	if g.Type == "lxc" {
+		e.enrichCS(ctx, g, &res, log)
+	}
 
 	key := target(g).Key()
 	if err := e.Store.Put(key, res); err != nil {
@@ -181,7 +193,14 @@ func explainExit(code int, errs []string) error {
 		}
 		return fmt.Errorf("refusé par le wrapper du nœud : %s", strings.TrimPrefix(last, "PW-REFUS: "))
 	case exitBusy:
-		return errors.New("une opération PatchWarden est déjà en cours sur ce CT (verrou du nœud)")
+		return errors.New("une opération PatchWarden est déjà en cours sur cet invité (verrou du nœud)")
+	case exitAgent:
+		if strings.HasPrefix(last, "PW-AGENT: ") {
+			return errors.New(strings.TrimPrefix(last, "PW-AGENT: "))
+		}
+		return errors.New("agent invité QEMU injoignable : installez et démarrez qemu-guest-agent dans la VM, et activez l'option « QEMU Guest Agent » dans Proxmox")
+	case exitAgentExec:
+		return fmt.Errorf("exécution par l'agent invité impossible : %s", last)
 	case exitNotRunning:
 		return ErrStopped
 	case 124:
@@ -321,4 +340,12 @@ func summarize(r detect.Result) string {
 		return "rien à signaler"
 	}
 	return strings.Join(parts, " · ")
+}
+
+// verb compose le verbe du wrapper selon le type d'invité (lxc-… ou vm-…).
+func verb(g inventory.Guest, base string) string {
+	if g.Type == "qemu" {
+		return "vm-" + base
+	}
+	return "lxc-" + base
 }

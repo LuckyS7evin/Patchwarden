@@ -101,6 +101,11 @@ cache_ttl = "6h"
 # detect_at = ["03:40"]
 
 # Snapshots avant mise à jour (LXC ; stockage LVM-thin, ZFS, Ceph RBD ou Btrfs).
+# Fin de support des OS : table intégrée, rafraîchie une fois par jour depuis
+# endoflife.date (lecture publique). source = "-" : table intégrée seule.
+# [eol]
+# source = "https://endoflife.date/api"
+
 # [snapshots]
 # default = false          # case cochée par défaut pour tous les invités ; sinon, seulement
 #                          # pour les invités critiques et les changements de version majeure

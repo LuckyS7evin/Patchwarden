@@ -28,6 +28,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/cs"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
+	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"github.com/LuckyS7evin/patchwarden/internal/notify"
@@ -202,6 +203,7 @@ func serve(args []string) error {
 		Snap:       engine.SnapConfig{Default: cfg.Snapshots.Default, Keep: cfg.Snapshots.Keep, MaxPct: cfg.Snapshots.MaxStoragePct},
 		SnapPrefs:  snapPrefs,
 		Batches:    batches,
+		EOL:        eol.New(cfg.EOL.Source, nil),
 	}
 	jm.OnFinish = eng.NotifyJob
 	if cfg.SSH.Enabled() {

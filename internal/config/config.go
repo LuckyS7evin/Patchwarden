@@ -51,10 +51,17 @@ type Config struct {
 	Schedule  Schedule   `toml:"schedule"`
 	UI        UI         `toml:"ui"`
 	Snapshots Snapshots  `toml:"snapshots"`
+	EOL       EOL        `toml:"eol"`
 	Notify    []Notify   `toml:"notify"`
 }
 
-// Snapshots règle les snapshots pris avant une mise à jour (LXC).
+// EOL règle la fin de support des systèmes. La table intégrée est rafraîchie
+// une fois par jour depuis Source (endoflife.date) ; Source = "" : table seule.
+type EOL struct {
+	Source string `toml:"source"`
+}
+
+// Snapshots règle les snapshots pris avant une mise à jour.
 type Snapshots struct {
 	// Default : case « snapshot avant mise à jour » cochée par défaut pour tous
 	// les invités. Défaut : false. Elle est de toute façon pré-cochée pour les
@@ -290,6 +297,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.CS.WebsiteURL == "" {
 		c.CS.WebsiteURL = "https://community-scripts.org"
+	}
+	if c.EOL.Source == "" {
+		c.EOL.Source = "https://endoflife.date/api"
+	} else if c.EOL.Source == "-" {
+		c.EOL.Source = ""
 	}
 	if c.Snapshots.Keep == 0 {
 		c.Snapshots.Keep = 1

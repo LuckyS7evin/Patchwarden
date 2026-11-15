@@ -52,6 +52,13 @@ func (e *Engine) PlanRestart(g inventory.Guest) RestartPlan {
 		return p
 	}
 	p.Det = &det
+	if det.Special == "pve" {
+		p.Why = "Proxmox VE est installé dans cet invité : PatchWarden ne le redémarre pas"
+		return p
+	}
+	if det.Special != "" {
+		p.NeedName = true
+	}
 	p.Units = det.RestartableUnits()
 	for _, u := range det.RestartUnits {
 		if !contains(p.Units, u) {
@@ -86,7 +93,7 @@ func (e *Engine) RestartServices(g inventory.Guest, user string, confirmed bool)
 	}
 	return e.Jobs.Submit(jobs.KindServices, target(g), false, user, func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
 		log(false, fmt.Sprintf("Services à redémarrer d'après la détection : %s", strings.Join(p.Units, ", ")))
-		cmd := fmt.Sprintf("lxc-restart-services %d", g.VMID)
+		cmd := fmt.Sprintf("%s %d", verb(g, "restart-services"), g.VMID)
 		log(false, "▶ "+cmd)
 		out, errs, code, err := e.run(ctx, g.Node, cmd, log)
 		if err != nil {
@@ -119,7 +126,7 @@ func (e *Engine) Reboot(g inventory.Guest, user string, confirmed bool, typedNam
 		return jobs.Job{}, fmt.Errorf("%w : saisissez exactement le nom de l'invité (%s)", ErrConfirm, g.Name)
 	}
 	return e.Jobs.Submit(jobs.KindReboot, target(g), false, user, func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
-		cmd := fmt.Sprintf("lxc-reboot %d", g.VMID)
+		cmd := fmt.Sprintf("%s %d", verb(g, "reboot"), g.VMID)
 		log(false, "▶ "+cmd)
 		out, errs, code, err := e.run(ctx, g.Node, cmd, log)
 		if err != nil {

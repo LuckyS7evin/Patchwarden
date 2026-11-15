@@ -17,6 +17,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/config"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
+	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 )
@@ -49,6 +50,7 @@ type Engine interface {
 	Reboot(g inventory.Guest, user string, confirmed bool, typedName string) (jobs.Job, error)
 	PreviewBatch(reqs []engine.BatchRequest) []string
 	StartBatch(reqs []engine.BatchRequest, dryRun, stopOnFail bool, user string) (engine.Batch, error)
+	OSSupport(r detect.Result) eol.Status
 }
 
 // Batches donne accès aux lots.
@@ -181,6 +183,12 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		},
 	}
 	funcs["upper"] = strings.ToUpper
+	funcs["guestNoun"] = func(typ string) string {
+		if typ == "qemu" {
+			return "la VM"
+		}
+		return "le CT"
+	}
 	funcs["level"] = level
 	funcs["bar"] = barSVG
 	funcs["initials"] = initials
@@ -429,6 +437,7 @@ type row struct {
 	CanDetect bool
 	Why       string
 	Self      bool
+	OS        eol.Status // support du système (vide sans détection)
 }
 
 // Pending : la dernière détection signale quelque chose à faire.
@@ -463,6 +472,9 @@ func (s *Server) rowFor(g inventory.Guest) row {
 		}
 	}
 	r.Icon = iconURL(g, r.Det)
+	if r.Det != nil && s.deps.Engine != nil {
+		r.OS = s.deps.Engine.OSSupport(*r.Det)
+	}
 	for _, t := range g.Tags {
 		if !strings.EqualFold(t, s.cfg.Policy.CommunityScriptTag) || s.cfg.Policy.CommunityScriptTag == "" {
 			r.ShownTags = append(r.ShownTags, t)
@@ -657,7 +669,7 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 				groups[k] = ng
 			}
 			ng.Rows = append(ng.Rows, rw)
-			if rw.Det != nil && g.Type == "lxc" && !g.Critical {
+			if rw.Det != nil && !g.Critical && rw.Det.Special == "" {
 				if rw.Det.Apt.Security > 0 {
 					ng.Sec++
 				}

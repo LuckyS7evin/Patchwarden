@@ -26,6 +26,7 @@
     <a href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}?onglet=snapshots">Revenir à cet état ou supprimer →</a>
   </div>{{end}}
   <div class="card flat"><h4>Système</h4>
+    {{with $.Row.OS}}{{if .Level}}<div class="row"><span>Support</span><span class="b {{if eq .Level "crit"}}c{{else if eq .Level "warn"}}w{{else}}ok{{end}}">{{.Text}}</span></div>{{end}}{{end}}
     <div class="row"><span>Ressources</span><span>{{.Nproc}} CPU · {{.MemMB}} Mo</span></div>
     <div class="row"><span>Disque /</span><span>{{.RootUsedPct}} %</span></div>
     {{range .Snap.Storages}}<div class="row"><span>Stockage</span><span>{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{pct .UsedPct}} %{{end}}</span></div>{{end}}

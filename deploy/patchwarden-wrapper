@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 7) :
+# Verbes (version 8) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -40,6 +40,12 @@
 #                                          exclus)
 #   lxc-reboot <vmid>                      redémarre le CT (pct reboot)
 #
+#   vm-detect, vm-apt, vm-snapshot, vm-snapdel, vm-rollback, vm-restart-services,
+#   vm-reboot : mêmes arguments et mêmes effets pour une VM. Les scripts y sont
+#   exécutés par l'agent invité QEMU (qm guest exec, script sur l'entrée
+#   standard) ; les opérations longues tournent en arrière-plan dans la VM et
+#   leur journal est relu toutes les 2 s.
+#
 # Snapshots : seuls ceux dont le nom suit pw-AAAAMMJJ-HHMM-(complet|securite)
 # sont acceptés. Les snapshots créés à la main ne sont jamais touchés.
 #
@@ -48,13 +54,15 @@
 # inconnu), 42 snapshot déjà existant, 43 échec de pct snapshot, 44 snapshot
 # introuvable, 45 échec de pct delsnapshot / rollback, 46 CT non redémarré,
 # 50 échec du redémarrage d'un service, 51 systemd absent, 52 échec de pct reboot,
+# 4 agent invité injoignable (VM), 5 échec d'exécution par l'agent, 22 la mise à
+# jour supprimerait des paquets (refusée),
 # autre : code renvoyé par la commande exécutée dans l'invité.
 # ==============================================================================
 
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=7
+WRAPPER_VERSION=8
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -67,6 +75,9 @@ LOCK_DIR="${PATCHWARDEN_LOCK_DIR:-/run/lock}"
 # Attente maximale (s) et intervalle (s) pour que le CT voie ses ressources augmentées.
 RES_WAIT="${PATCHWARDEN_RES_WAIT:-60}"
 RES_POLL="${PATCHWARDEN_RES_POLL:-2}"
+# VM : dossier de travail dans la VM et intervalle de relecture du journal.
+VM_TMP="${PATCHWARDEN_VM_TMP:-/var/tmp}"
+VM_POLL="${PATCHWARDEN_VM_POLL:-2}"
 SELF="$(readlink -f "$0")"
 # « --detache » : relance locale par run_detached ; jamais accessible à la clé
 # SSH, dont la commande forcée ne transmet aucun argument.
@@ -90,21 +101,40 @@ read -r -a ARGS <<<"$CMD"
 VERB="${ARGS[0]:-}"
 [[ -n "$VERB" ]] || refuse "commande vide"
 
-# Vérifie qu'un CT existe sur CE nœud.
-check_ct_exists() {
-	local vmid="$1"
-	[[ "$vmid" =~ ^[1-9][0-9]{1,8}$ ]] || refuse "VMID invalide : $vmid"
-	[[ -f "${PVE_DIR}/nodes/${NODE}/lxc/${vmid}.conf" ]] || refuse "CT ${vmid} absent du nœud ${NODE}"
+# Type d'invité, d'après le préfixe du verbe : lxc- (pct) ou vm- (qm).
+GT=lxc TOOL=pct API=lxc CONFDIR=lxc NOUN=CT
+BASE="$VERB"
+if [[ "$VERB" =~ ^(lxc|vm)-([a-z-]+)$ ]]; then
+	BASE="${BASH_REMATCH[2]}"
+	if [[ "${BASH_REMATCH[1]}" == vm ]]; then
+		GT=vm TOOL=qm API=qemu CONFDIR=qemu-server NOUN=VM
+	fi
+elif [[ "$VERB" != ping ]]; then
+	refuse "verbe inconnu : ${VERB}"
+fi
+
+guest_conf() { echo "${PVE_DIR}/nodes/${NODE}/${CONFDIR}/${VMID}.conf"; }
+
+# Vérifie que l'invité existe sur CE nœud.
+check_guest_exists() {
+	VMID="$1"
+	[[ "$VMID" =~ ^[1-9][0-9]{1,8}$ ]] || refuse "VMID invalide : $VMID"
+	[[ -f "$(guest_conf)" ]] || refuse "${NOUN} ${VMID} absent du nœud ${NODE}"
 }
 
-# Vérifie qu'un CT existe sur CE nœud et qu'il est démarré.
-check_ct() {
-	local vmid="$1" status
-	check_ct_exists "$vmid"
-	status="$(pct status "$vmid" 2>/dev/null)"
+# Vérifie que l'invité existe sur CE nœud et qu'il est démarré (VM : et que
+# son agent répond).
+check_guest() {
+	local status
+	check_guest_exists "$1"
+	status="$("$TOOL" status "$VMID" 2>/dev/null)"
 	if [[ "$status" != "status: running" ]]; then
-		echo "PW-ARRETE: CT ${vmid} non démarré (${status:-état inconnu})" >&2
+		echo "PW-ARRETE: ${NOUN} ${VMID} non démarré (${status:-état inconnu})" >&2
 		exit 3
+	fi
+	if [[ "$GT" == vm ]] && ! timeout 20 qm agent "$VMID" ping </dev/null >/dev/null 2>&1; then
+		echo "PW-AGENT: agent invité de la VM ${VMID} injoignable (qemu-guest-agent installé et démarré dans la VM, option « QEMU Guest Agent » activée dans Proxmox ?)" >&2
+		exit 4
 	fi
 }
 
@@ -266,7 +296,9 @@ if has apt-get; then
 		END { print "apt.total=" n + 0; print "apt.security=" s + 0 }'
 	kv apt.upgrade_simple "$(apt-get -s -o Debug::NoLocking=1 upgrade </dev/null 2>/dev/null | grep -c '^Inst ')"
 	# Paquets que seul un dist-upgrade installerait (il peut supprimer des paquets) : non appliqués.
-	kv apt.dist_total "$(apt-get -s -o Debug::NoLocking=1 dist-upgrade </dev/null 2>/dev/null | grep -c '^Inst ')"
+	dist="$(apt-get -s -o Debug::NoLocking=1 dist-upgrade </dev/null 2>/dev/null)"
+	kv apt.dist_total "$(printf '%s\n' "$dist" | grep -c '^Inst ')"
+	kv apt.dist_remove "$(printf '%s\n' "$dist" | grep -c '^Remv ')"
 
 	# Simulation « sécurité seule » stricte : uniquement les dépôts *-security.
 	tmp="$(mktemp -d /tmp/.pw-detect.XXXXXX)"
@@ -281,6 +313,19 @@ if has apt-get; then
 	rm -rf "$tmp"
 else
 	kv apt.present 0
+fi
+
+# Produits particuliers : hôte Proxmox VE (jamais mis à jour), PBS, OpenMediaVault.
+if has dpkg-query; then
+	pv() { dpkg-query -W -f='${Status} ${Version}\n' "$1" 2>/dev/null </dev/null | awk '$3 == "installed" { print $4 }'; }
+	for p in pve-manager:pve proxmox-backup-server:pbs openmediavault:omv; do
+		v="$(pv "${p%%:*}")"
+		if [ -n "$v" ]; then
+			kv special.kind "${p##*:}"
+			kv special.version "$v"
+			break
+		fi
+	done
 fi
 
 if has docker && docker info </dev/null >/dev/null 2>&1; then
@@ -332,10 +377,33 @@ if [ "$MODE" = security ]; then
 	cat "$tmp/sources.list" "$tmp"/parts/* 2>/dev/null | grep -E '^(deb |URIs:|Suites:)' | sed 's/^/PW:   /'
 	OPTS="$OPTS -o Dir::Etc::SourceList=$tmp/sources.list -o Dir::Etc::SourceParts=$tmp/parts"
 fi
-echo "PW: apt-get --with-new-pkgs upgrade"
-# shellcheck disable=SC2086
-apt-get $OPTS -y --with-new-pkgs upgrade </dev/null
-rc=$?
+case "$MODE" in
+dist | omv)
+	# Méthode recommandée pour PBS (dist-upgrade) et OpenMediaVault
+	# (omv-upgrade) ; jamais de suppression de paquet.
+	nrm="$(apt-get -s -o Debug::NoLocking=1 dist-upgrade </dev/null 2>/dev/null | grep -c '^Remv ')"
+	if [ "$nrm" != 0 ]; then
+		echo "PW-ERREUR: la mise à jour supprimerait ${nrm} paquet(s) : à faire à la main"
+		exit 22
+	fi
+	if [ "$MODE" = omv ] && [ "$DRY" != 1 ] && command -v omv-upgrade >/dev/null 2>&1; then
+		echo "PW: omv-upgrade (méthode OpenMediaVault : dist-upgrade puis déploiement de la configuration)"
+		omv-upgrade </dev/null
+		rc=$?
+	else
+		echo "PW: apt-get dist-upgrade"
+		# shellcheck disable=SC2086
+		apt-get $OPTS -y dist-upgrade </dev/null
+		rc=$?
+	fi
+	;;
+*)
+	echo "PW: apt-get --with-new-pkgs upgrade"
+	# shellcheck disable=SC2086
+	apt-get $OPTS -y --with-new-pkgs upgrade </dev/null
+	rc=$?
+	;;
+esac
 [ -n "$tmp" ] && rm -rf "$tmp"
 if [ "$DRY" != 1 ] && [ "$rc" = 0 ]; then
 	apt-get -o APT::Color=0 -y autoclean </dev/null >/dev/null 2>&1
@@ -396,6 +464,99 @@ exit "$rc"
 CSUPDATE_EOF
 
 # ------------------------------------------------------------------------------
+# Exécution d'un script dans l'invité (script sur l'entrée standard).
+#   g_sh <délai> [args]     : sortie rendue à la fin (VM) ou au fil de l'eau (CT)
+#   g_stream <délai> [args] : sortie au fil de l'eau dans les deux cas
+# ------------------------------------------------------------------------------
+# Réponse de qm guest exec : JSON dont la sortie est encodée deux fois (octets
+# de la VM lus en latin-1) ; chaque caractère est réécrit tel quel en octet.
+read -r -d '' VMDECODE <<'VMDECODE_EOF'
+no warnings;
+local $/;
+my $d = eval { JSON::PP->new->utf8->decode(<STDIN> // "") };
+if (ref $d ne "HASH") { print STDERR "PW-AGENT: réponse illisible de qm guest exec (agent invité injoignable ?)\n"; exit 4 }
+if (!$d->{exited}) { print STDERR "PW-ERREUR: délai dépassé dans la VM\n"; exit 124 }
+binmode STDOUT; binmode STDERR;
+print STDOUT $d->{"out-data"} if defined $d->{"out-data"};
+print STDERR $d->{"err-data"} if defined $d->{"err-data"};
+exit($d->{exitcode} // 1);
+VMDECODE_EOF
+
+# Lancement en arrière-plan dans la VM : $1 = préfixe des fichiers (.sh, .log, .rc).
+read -r -d '' VM_LAUNCH <<'VM_LAUNCH_EOF'
+f="$1"; shift
+S=""; command -v setsid >/dev/null 2>&1 && S=setsid
+$S sh -c 'sh "$0.sh" "$@" > "$0.log" 2>&1 < /dev/null; echo $? > "$0.rc"' "$f" "$@" > /dev/null 2>&1 < /dev/null &
+VM_LAUNCH_EOF
+
+# vm_cmd <délai> <commande>... : qm guest exec (entrée standard transmise).
+vm_cmd() {
+	local t="$1"
+	shift
+	timeout $((t + 30)) qm guest exec "$VMID" --pass-stdin 1 --timeout "$t" -- "$@" | perl -MJSON::PP -e "$VMDECODE"
+	return "${PIPESTATUS[1]}"
+}
+
+# vm_stream : dépose le script dans la VM, le lance en arrière-plan, puis relit
+# son journal par décalage jusqu'au code de sortie.
+vm_stream() {
+	local t="$1" f off=0 n rc="" start=$SECONDS chunk errf
+	shift
+	f="${VM_TMP}/patchwarden-$(date +%s)-$$"
+	chunk="$(mktemp)" errf="$(mktemp)"
+	if ! vm_cmd 60 sh -c 'umask 077; cat > "$1.sh"' sh "$f"; then
+		echo "PW-ERREUR: dépôt du script dans la VM impossible"
+		rm -f "$chunk" "$errf"
+		return 5
+	fi
+	if ! vm_cmd 30 sh -c "$VM_LAUNCH" sh "$f" "$@" </dev/null; then
+		echo "PW-ERREUR: lancement du script dans la VM impossible"
+		rm -f "$chunk" "$errf"
+		return 5
+	fi
+	while :; do
+		sleep "$VM_POLL"
+		vm_cmd 60 sh -c 'tail -c +"$2" "$1.log" 2>/dev/null; if [ -f "$1.rc" ]; then cat "$1.rc" >&2; fi' sh "$f" "$((off + 1))" </dev/null >"$chunk" 2>"$errf"
+		n="$(stat -c %s "$chunk")"
+		cat "$chunk"
+		off=$((off + n))
+		if [[ -n "$rc" ]]; then
+			break
+		fi
+		rc="$(grep -E '^[0-9]+$' "$errf" | tail -n 1)"
+		[[ -n "$rc" ]] && continue # une dernière lecture pour la fin du journal
+		if ((SECONDS - start > t)); then
+			echo "PW-ERREUR: délai de ${t} s dépassé ; l'opération continue peut-être dans la VM (journal : ${f}.log)"
+			rm -f "$chunk" "$errf"
+			return 124
+		fi
+	done
+	vm_cmd 30 rm -f "$f.sh" "$f.log" "$f.rc" </dev/null >/dev/null 2>&1
+	rm -f "$chunk" "$errf"
+	return "$rc"
+}
+
+g_sh() {
+	local t="$1"
+	shift
+	if [[ "$GT" == vm ]]; then
+		vm_cmd "$t" sh -s -- "$@"
+	else
+		timeout "$t" pct exec "$VMID" -- sh -s -- "$@"
+	fi
+}
+
+g_stream() {
+	local t="$1"
+	shift
+	if [[ "$GT" == vm ]]; then
+		vm_stream "$t" "$@"
+	else
+		timeout "$t" pct exec "$VMID" -- sh -s -- "$@"
+	fi
+}
+
+# ------------------------------------------------------------------------------
 # Exécution détachée des mises à jour réelles. La partie visible (connexion SSH)
 # ne fait que suivre le journal ; le travail tourne dans une nouvelle session,
 # sous verrou par CT : si la connexion est perdue, la mise à jour se termine
@@ -419,15 +580,20 @@ run_detached() {
 	wait "$bg"
 	rc=$?
 	if [[ "$rc" == 99 ]]; then
-		echo "PW-REFUS: une opération PatchWarden est déjà en cours sur le CT ${VMID}" >&2
+		echo "PW-REFUS: une opération PatchWarden est déjà en cours sur l'invité ${VMID}" >&2
 	fi
 	exit "$rc"
 }
 
 run_apt() {
-	log "lxc-apt ${VMID} ${ARGS[2]} simulation=${ARGS[3]}"
-	timeout "$TIMEOUT_UPDATE" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" "${ARGS[3]}" <<<"${SECSRC}
+	log "${VERB} ${VMID} ${ARGS[2]} simulation=${ARGS[3]}"
+	if [[ "${ARGS[3]}" == 1 ]]; then
+		g_sh 900 "${ARGS[2]}" "${ARGS[3]}" <<<"${SECSRC}
 ${APTRUN}"
+	else
+		g_stream "$TIMEOUT_UPDATE" "${ARGS[2]}" "${ARGS[3]}" <<<"${SECSRC}
+${APTRUN}"
+	fi
 }
 
 run_cs_update() {
@@ -524,10 +690,16 @@ DESC64="-"
 # (API Proxmox, mêmes règles que l'interface), stockages et remplissage,
 # snapshots PatchWarden (nom, date, description), nombre des autres snapshots.
 snap_info() {
-	local conf="${PVE_DIR}/nodes/${NODE}/lxc/${VMID}.conf" feat vol st line binds=0
+	local conf feat vol st line binds=0 vols
+	conf="$(guest_conf)"
 	local -A seen=()
 	echo "snap.info=1"
-	feat="$(pvesh get "/nodes/${NODE}/lxc/${VMID}/feature" --feature snapshot --output-format json 2>/dev/null)"
+	feat="$(pvesh get "/nodes/${NODE}/${API}/${VMID}/feature" --feature snapshot --output-format json 2>/dev/null)"
+	if [[ "$GT" == vm ]]; then
+		vols="$(sed -n '/^\[/q;/media=cdrom/d;s/^\(scsi[0-9]\+\|virtio[0-9]\+\|sata[0-9]\+\|ide[0-9]\+\|efidisk0\|tpmstate0\): *\([^,]*\).*/\2/p' "$conf")"
+	else
+		vols="$(sed -n '/^\[/q;s/^\(rootfs\|mp[0-9]\+\): *\([^,]*\).*/\2/p' "$conf")"
+	fi
 	if [[ "$feat" =~ \"hasFeature\":[[:space:]]*(1|true) ]]; then echo "snap.possible=1"; else echo "snap.possible=0"; fi
 	while IFS= read -r vol; do
 		if [[ "$vol" == /* ]]; then
@@ -539,9 +711,9 @@ snap_info() {
 		seen[$st]=1
 		line="$(pvesm status --storage "$st" 2>/dev/null | awk 'NR==2{gsub("%","",$7); print $2, $7}')"
 		echo "snap.storage=${st} ${line:-? -1}"
-	done < <(sed -n '/^\[/q;s/^\(rootfs\|mp[0-9]\+\): *\([^,]*\).*/\2/p' "$conf")
+	done <<<"$vols"
 	echo "snap.bind=${binds}"
-	pvesh get "/nodes/${NODE}/lxc/${VMID}/snapshot" --output-format json 2>/dev/null | perl -MJSON::PP -e '
+	pvesh get "/nodes/${NODE}/${API}/${VMID}/snapshot" --output-format json 2>/dev/null | perl -MJSON::PP -e '
 		binmode STDOUT, ":encoding(UTF-8)";
 		local $/;
 		my $d = eval { JSON::PP->new->utf8->decode(<STDIN>) };
@@ -567,7 +739,7 @@ snap_check() {
 	local info st typ pct ok=1
 	info="$(snap_info)"
 	if ! grep -qx 'snap.possible=1' <<<"$info"; then
-		echo "PW-ERREUR: snapshot impossible : le stockage de ce CT ne le permet pas ($(sed -n 's/^snap\.storage=\([^ ]*\) \([^ ]*\).*/\1 : \2/p' <<<"$info" | paste -sd, -)). Stockages compatibles : LVM-thin, ZFS, Ceph RBD, Btrfs"
+		echo "PW-ERREUR: snapshot impossible : le stockage de cette ${NOUN} ne le permet pas (ou disque physique en passthrough) ($(sed -n 's/^snap\.storage=\([^ ]*\) \([^ ]*\).*/\1 : \2/p' <<<"$info" | paste -sd, -)). Stockages compatibles : LVM-thin, ZFS, Ceph RBD, Btrfs"
 		return 40
 	fi
 	while read -r st typ pct; do
@@ -583,7 +755,7 @@ snap_check() {
 		ok=0
 	done < <(sed -n 's/^snap\.storage=//p' <<<"$info")
 	if [[ "$ok" == 1 ]]; then
-		echo "PW-ERREUR: aucun stockage trouvé pour ce CT : snapshot refusé"
+		echo "PW-ERREUR: aucun stockage trouvé pour cet invité : snapshot refusé"
 		return 41
 	fi
 	if grep -q "^snap\.pw=${SNAP} " <<<"$info"; then
@@ -591,7 +763,7 @@ snap_check() {
 		return 42
 	fi
 	if grep -q '^snap\.bind=[1-9]' <<<"$info"; then
-		echo "PW: attention : les points de montage liés à l'hôte (bind mounts) ne font pas partie du snapshot"
+		echo "PW: attention : les volumes hors stockage Proxmox (montages liés, disques en passthrough) ne font pas partie du snapshot"
 	fi
 	echo "PW: snapshot ${SNAP} possible"
 	return 0
@@ -613,13 +785,13 @@ run_snapshot() {
 	((rc == 0)) || exit "$rc"
 	desc="$(desc_decode "$DESC64")"
 	[[ -n "$desc" ]] || desc="PatchWarden"
-	log "lxc-snapshot ${VMID} ${SNAP}"
+	log "${VERB} ${VMID} ${SNAP}"
 	echo "PW: création du snapshot ${SNAP}"
 	# Les commandes pct décodent leurs arguments selon la locale
 	# (PVE::JSONSchema, decode('locale')) : en LC_ALL=C, chaque octet accentué
 	# de la description deviendrait « � ».
-	if ! LC_ALL=C.UTF-8 pct snapshot "$VMID" "$SNAP" --description "$desc" </dev/null; then
-		echo "PW-ERREUR: pct snapshot a échoué : mise à jour annulée"
+	if ! LC_ALL=C.UTF-8 "$TOOL" snapshot "$VMID" "$SNAP" --description "$desc" </dev/null; then
+		echo "PW-ERREUR: ${TOOL} snapshot a échoué : mise à jour annulée"
 		exit 43
 	fi
 	echo "PW: snapshot ${SNAP} créé"
@@ -627,9 +799,9 @@ run_snapshot() {
 	# (le nom commence par la date : l'ordre alphabétique est l'ordre chronologique).
 	while IFS= read -r old; do
 		[[ "$old" =~ $PW_SNAP_RE && "$old" != "$SNAP" ]] || continue
-		if pct delsnapshot "$VMID" "$old" </dev/null; then
+		if "$TOOL" delsnapshot "$VMID" "$old" </dev/null; then
 			echo "PW: ancien snapshot ${old} supprimé (rétention : ${KEEP})"
-			log "lxc-snapshot ${VMID} : ${old} supprimé (rétention)"
+			log "${VERB} ${VMID} : ${old} supprimé (rétention)"
 		else
 			echo "PW-ALERTE: suppression de l'ancien snapshot ${old} impossible"
 		fi
@@ -639,12 +811,12 @@ run_snapshot() {
 
 run_snapdel() {
 	if ! snap_exists; then
-		echo "PW-ERREUR: snapshot ${SNAP} introuvable sur le CT ${VMID}"
+		echo "PW-ERREUR: snapshot ${SNAP} introuvable sur l'invité ${VMID}"
 		exit 44
 	fi
-	log "lxc-snapdel ${VMID} ${SNAP}"
-	if ! pct delsnapshot "$VMID" "$SNAP" </dev/null; then
-		echo "PW-ERREUR: pct delsnapshot a échoué"
+	log "${VERB} ${VMID} ${SNAP}"
+	if ! "$TOOL" delsnapshot "$VMID" "$SNAP" </dev/null; then
+		echo "PW-ERREUR: ${TOOL} delsnapshot a échoué"
 		exit 45
 	fi
 	echo "PW: snapshot ${SNAP} supprimé"
@@ -654,88 +826,100 @@ run_snapdel() {
 run_rollback() {
 	local before after
 	if ! snap_exists; then
-		echo "PW-ERREUR: snapshot ${SNAP} introuvable sur le CT ${VMID}"
+		echo "PW-ERREUR: snapshot ${SNAP} introuvable sur l'invité ${VMID}"
 		exit 44
 	fi
-	before="$(pct status "$VMID" 2>/dev/null)"
+	before="$("$TOOL" status "$VMID" 2>/dev/null)"
 	echo "PW: état avant : ${before#status: }"
-	echo "PW: retour au snapshot ${SNAP} (le CT est arrêté pendant l'opération)"
-	log "lxc-rollback ${VMID} ${SNAP}"
-	if ! pct rollback "$VMID" "$SNAP" </dev/null; then
-		echo "PW-ERREUR: pct rollback a échoué"
+	echo "PW: retour au snapshot ${SNAP} (l'invité est arrêté pendant l'opération)"
+	log "${VERB} ${VMID} ${SNAP}"
+	if ! "$TOOL" rollback "$VMID" "$SNAP" </dev/null; then
+		echo "PW-ERREUR: ${TOOL} rollback a échoué"
 		exit 45
 	fi
 	echo "PW: retour au snapshot ${SNAP} terminé"
-	if [[ "$before" == "status: running" && "$(pct status "$VMID" 2>/dev/null)" != "status: running" ]]; then
-		echo "PW: redémarrage du CT (il tournait avant)"
-		if ! pct start "$VMID" </dev/null; then
-			echo "PW-ERREUR: le CT n'a pas redémarré : démarrez-le à la main"
+	if [[ "$before" == "status: running" && "$("$TOOL" status "$VMID" 2>/dev/null)" != "status: running" ]]; then
+		echo "PW: redémarrage de l'invité (il tournait avant)"
+		if ! "$TOOL" start "$VMID" </dev/null; then
+			echo "PW-ERREUR: l'invité n'a pas redémarré : démarrez-le à la main"
 			exit 46
 		fi
 	fi
-	after="$(pct status "$VMID" 2>/dev/null)"
+	after="$("$TOOL" status "$VMID" 2>/dev/null)"
 	echo "PW: état après : ${after#status: }"
 	snap_info
 }
 
 run_restart_services() {
-	log "lxc-restart-services ${VMID}"
-	timeout 900 pct exec "$VMID" -- sh -s <<<"${RESTARTSCAN}
+	log "${VERB} ${VMID}"
+	g_stream 900 <<<"${RESTARTSCAN}
 ${RESTARTSVC}"
 }
 
 run_reboot() {
 	local st i
-	log "lxc-reboot ${VMID}"
-	echo "PW: redémarrage du CT ${VMID} (pct reboot)"
-	if ! timeout 300 pct reboot "$VMID" --timeout 120 </dev/null; then
-		echo "PW-ERREUR: pct reboot a échoué"
+	log "${VERB} ${VMID}"
+	echo "PW: redémarrage de l'invité ${VMID} (${TOOL} reboot)"
+	if ! timeout 300 "$TOOL" reboot "$VMID" --timeout 120 </dev/null; then
+		echo "PW-ERREUR: ${TOOL} reboot a échoué"
 		exit 52
 	fi
 	for ((i = 0; i < 60; i++)); do
-		st="$(pct status "$VMID" 2>/dev/null)"
+		st="$("$TOOL" status "$VMID" 2>/dev/null)"
 		[[ "$st" == "status: running" ]] && break
 		sleep "$RES_POLL"
 	done
+	if [[ "$GT" == vm && "$st" == "status: running" ]]; then
+		for ((i = 0; i < 90; i++)); do
+			if timeout 20 qm agent "$VMID" ping </dev/null >/dev/null 2>&1; then
+				echo "PW: agent invité de nouveau joignable"
+				break
+			fi
+			sleep "$RES_POLL"
+		done
+	fi
 	echo "PW: état après : ${st#status: }"
 	[[ "$st" == "status: running" ]] || exit 52
 }
 
-case "$VERB" in
+# Verbes disponibles pour les VM (pas d'appli community-scripts dans une VM).
+if [[ "$GT" == vm && ! "$BASE" =~ ^(detect|apt|snapshot|snapdel|rollback|restart-services|reboot)$ ]]; then
+	refuse "verbe indisponible pour une VM : ${VERB}"
+fi
+
+case "$BASE" in
 ping)
 	[[ ${#ARGS[@]} -eq 1 ]] || refuse "ping ne prend pas d'argument"
 	echo "pw.wrapper_version=${WRAPPER_VERSION}"
 	echo "pw.node=${NODE}"
 	echo "pw.pve=$(pveversion 2>/dev/null | head -n 1)"
 	;;
-lxc-detect)
-	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-detect <vmid> <0|1>"
+detect)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : ${VERB} <vmid> <0|1>"
 	[[ "${ARGS[2]}" =~ ^[01]$ ]] || refuse "rafraîchissement attendu : 0 ou 1"
-	VMID="${ARGS[1]}"
-	check_ct "$VMID"
-	log "lxc-detect ${VMID} refresh=${ARGS[2]}"
-	timeout "$TIMEOUT_DETECT" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" <<<"${SECSRC}
+	check_guest "${ARGS[1]}"
+	log "${VERB} ${VMID} refresh=${ARGS[2]}"
+	g_sh "$TIMEOUT_DETECT" "${ARGS[2]}" <<<"${SECSRC}
 ${RESTARTSCAN}
 ${DETECT}"
 	rc=$?
 	snap_info
 	exit "$rc"
 	;;
-lxc-versions)
+versions)
 	[[ ${#ARGS[@]} -ge 3 && ${#ARGS[@]} -le 12 ]] || refuse "usage : lxc-versions <vmid> <app> (1 à 10 noms)"
 	for n in "${ARGS[@]:2}"; do
 		[[ "$n" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] || refuse "nom d'appli invalide : $n"
 	done
-	check_ct "${ARGS[1]}"
-	timeout 60 pct exec "${ARGS[1]}" -- sh -s -- "${ARGS[@]:2}" <<<"$VERSIONS"
+	check_guest "${ARGS[1]}"
+	g_sh 60 "${ARGS[@]:2}" <<<"$VERSIONS"
 	exit $?
 	;;
-lxc-apt)
-	[[ ${#ARGS[@]} -eq 4 ]] || refuse "usage : lxc-apt <vmid> <security|full> <0|1>"
-	[[ "${ARGS[2]}" =~ ^(security|full)$ ]] || refuse "mode attendu : security ou full"
+apt)
+	[[ ${#ARGS[@]} -eq 4 ]] || refuse "usage : ${VERB} <vmid> <security|full|dist|omv> <0|1>"
+	[[ "${ARGS[2]}" =~ ^(security|full|dist|omv)$ ]] || refuse "mode attendu : security, full, dist ou omv"
 	[[ "${ARGS[3]}" =~ ^[01]$ ]] || refuse "simulation attendue : 0 ou 1"
-	VMID="${ARGS[1]}"
-	check_ct "$VMID"
+	check_guest "${ARGS[1]}"
 	if [[ "${ARGS[3]}" == 1 ]]; then
 		# Simulation : lecture seule et courte, exécutée directement.
 		run_apt
@@ -743,54 +927,51 @@ lxc-apt)
 	fi
 	run_detached apt run_apt
 	;;
-lxc-cs-update)
+cs-update)
 	[[ ${#ARGS[@]} -eq 5 ]] || refuse "usage : lxc-cs-update <vmid> <réponses> <cpu> <ram_mo>"
 	[[ "${ARGS[2]}" =~ ^(-|[yn_](\.[yn_]){0,9})$ ]] || refuse "réponses attendues : - ou y/n/_ séparés par des points"
 	[[ "${ARGS[3]}" =~ ^[0-9]{1,2}$ && "${ARGS[3]}" -le 64 ]] || refuse "cpu attendu : 0 à 64"
 	[[ "${ARGS[4]}" =~ ^[0-9]{1,6}$ && "${ARGS[4]}" -le 262144 ]] || refuse "ram attendue : 0 à 262144 Mo"
-	VMID="${ARGS[1]}"
-	check_ct "$VMID"
+	check_guest "${ARGS[1]}"
 	run_detached cs-update run_cs_update
 	;;
-lxc-snapshot)
-	[[ ${#ARGS[@]} -eq 7 ]] || refuse "usage : lxc-snapshot <vmid> <nom> <garder> <seuil_pct> <0|1> <description>"
+snapshot)
+	[[ ${#ARGS[@]} -eq 7 ]] || refuse "usage : ${VERB} <vmid> <nom> <garder> <seuil_pct> <0|1> <description>"
 	[[ "${ARGS[2]}" =~ $PW_SNAP_RE ]] || refuse "nom de snapshot PatchWarden attendu (pw-AAAAMMJJ-HHMM-action) : ${ARGS[2]}"
 	[[ "${ARGS[3]}" =~ ^[1-9]$ ]] || refuse "nombre de snapshots à garder : 1 à 9"
 	[[ "${ARGS[4]}" =~ ^[1-9][0-9]?$ ]] || refuse "seuil de remplissage : 1 à 99 %"
 	[[ "${ARGS[5]}" =~ ^[01]$ ]] || refuse "vérification seule attendue : 0 ou 1"
 	[[ "${ARGS[6]}" =~ ^(-|[A-Za-z0-9_-]{1,440})$ ]] || refuse "description : base64url ou - attendu"
-	VMID="${ARGS[1]}" SNAP="${ARGS[2]}" KEEP="${ARGS[3]}" MAXPCT="${ARGS[4]}" DESC64="${ARGS[6]}"
-	check_ct "$VMID"
+	SNAP="${ARGS[2]}" KEEP="${ARGS[3]}" MAXPCT="${ARGS[4]}" DESC64="${ARGS[6]}"
+	check_guest "${ARGS[1]}"
 	if [[ "${ARGS[5]}" == 1 ]]; then
 		snap_check
 		exit $?
 	fi
 	run_detached snapshot run_snapshot
 	;;
-lxc-snapdel)
-	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-snapdel <vmid> <nom>"
+snapdel)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : ${VERB} <vmid> <nom>"
 	[[ "${ARGS[2]}" =~ $PW_SNAP_RE ]] || refuse "seuls les snapshots PatchWarden (pw-…) peuvent être supprimés : ${ARGS[2]}"
-	VMID="${ARGS[1]}" SNAP="${ARGS[2]}"
-	check_ct_exists "$VMID"
+	SNAP="${ARGS[2]}"
+	check_guest_exists "${ARGS[1]}"
 	run_detached snapdel run_snapdel
 	;;
-lxc-rollback)
-	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : lxc-rollback <vmid> <nom>"
+rollback)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : ${VERB} <vmid> <nom>"
 	[[ "${ARGS[2]}" =~ $PW_SNAP_RE ]] || refuse "retour arrière limité aux snapshots PatchWarden (pw-…) : ${ARGS[2]}"
-	VMID="${ARGS[1]}" SNAP="${ARGS[2]}"
-	check_ct_exists "$VMID"
+	SNAP="${ARGS[2]}"
+	check_guest_exists "${ARGS[1]}"
 	run_detached rollback run_rollback
 	;;
-lxc-restart-services)
-	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : lxc-restart-services <vmid>"
-	VMID="${ARGS[1]}"
-	check_ct "$VMID"
+restart-services)
+	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : ${VERB} <vmid>"
+	check_guest "${ARGS[1]}"
 	run_detached services run_restart_services
 	;;
-lxc-reboot)
-	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : lxc-reboot <vmid>"
-	VMID="${ARGS[1]}"
-	check_ct "$VMID"
+reboot)
+	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : ${VERB} <vmid>"
+	check_guest "${ARGS[1]}"
 	run_detached reboot run_reboot
 	;;
 *)

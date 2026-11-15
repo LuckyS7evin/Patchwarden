@@ -9,6 +9,7 @@
     <div class="sub">{{.TypeLabel}} {{.VMID}} · {{.Node}}{{with .Det}} · {{.OSPretty}} · {{.Nproc}} CPU · {{.MemMB}} Mo{{end}} · {{template "statut" .}}
       {{- if .CommunityScript}} <span class="b a">community-scripts</span>{{end}}
       {{- if .Critical}} <span class="b c" title="{{.CriticalReason}}">confirmation renforcée</span>{{end}}
+      {{- with .Det}}{{if .SpecialLabel}} <span class="b a">{{.SpecialLabel}} {{.SpecialVersion}}</span>{{end}}{{end}}
       {{- range .ShownTags}} <span class="b">{{.}}</span>{{end}}</div>
     {{with .Det}}
     {{template "frise" .Apps}}
@@ -82,8 +83,8 @@
     </dl>
     <div class="snapacts spaced">
       {{if .CanServices}}<a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/redemarrage?quoi=services">Redémarrer les services ({{len .Units}})…</a>{{end}}
-      <a class="btn{{if not .CanServices}} p{{end}}" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/redemarrage?quoi=ct">Redémarrer le CT…</a>
-      {{if .Reboot}}<span class="muted small">{{if .CanServices}}redémarrer les services ne suffit pas : le CT est conseillé{{end}}</span>{{end}}
+      <a class="btn{{if not .CanServices}} p{{end}}" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/redemarrage?quoi=ct">Redémarrer {{guestNoun .Guest.Type}}…</a>
+      {{if .Reboot}}<span class="muted small">{{if .CanServices}}redémarrer les services ne suffit pas : redémarrez {{guestNoun .Guest.Type}}{{end}}</span>{{end}}
     </div>
   </section>
   {{end}}{{end}}
@@ -104,6 +105,8 @@
       <h2>Système</h2>
       <dl class="kv">
         <dt>OS</dt><dd>{{.OSPretty}}</dd>
+        {{with $.Row.OS}}{{if .Level}}<dt>Support</dt><dd><span class="b {{if eq .Level "crit"}}c{{else if eq .Level "warn"}}w{{else}}ok{{end}}">{{.Text}}</span></dd>{{else if .Text}}<dt>Support</dt><dd class="muted">{{.Text}}</dd>{{end}}{{end}}
+        {{if .SpecialLabel}}<dt>Produit</dt><dd>{{.SpecialLabel}} {{.SpecialVersion}}{{if eq .Special "pve"}} <span class="b c">jamais mis à jour par PatchWarden</span>{{else}} <span class="muted small">confirmation renforcée, hors lots</span>{{end}}</dd>{{end}}
         <dt>Ressources</dt><dd>{{.Nproc}} CPU · {{.MemMB}} Mo</dd>
         <dt>Disque /</dt><dd>{{.RootUsedPct}} %{{if ge .RootUsedPct 75}} <span class="b w" title="Le moteur community-scripts refuse de mettre à jour au-delà de 80 %">limite : 80 %</span>{{end}}</dd>
         <dt>Redémarrage</dt><dd>{{if .RebootRequired}}<span class="b w">requis</span>{{else}}non requis{{end}}</dd>
@@ -153,7 +156,7 @@
 {{else if eq .Tab "snapshots"}}
 <section class="card">
   <h2>Snapshots</h2>
-  {{if and (eq .Row.Type "lxc") .Row.Det}}
+  {{if .Row.Det}}
   {{with .Row.Det.Snap}}
   {{if not .Known}}<p class="muted">Informations absentes : relancez une détection (wrapper v5 ou plus récent requis sur le nœud).</p>
   {{else}}
@@ -189,7 +192,7 @@
   {{end}}
   {{end}}
   {{else}}<p class="muted">Aucune information de snapshot pour cet invité.</p>{{end}}
-  {{if eq .Row.Type "lxc"}}
+  {{if or (eq .Row.Type "lxc") (eq .Row.Type "qemu")}}
   <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/snapshots/reglage" class="inline-form spaced">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <label>Case « snapshot avant mise à jour » pour cet invité :

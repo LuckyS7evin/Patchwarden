@@ -4,7 +4,7 @@
 <p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{.Guest.Name}}</a></p>
 <div class="pagehead">
   <div>
-    <h1>{{.Action.Label}} · {{.Guest.Name}} <span class="muted">· LXC {{.Guest.VMID}} sur {{.Guest.Node}}</span></h1>
+    <h1>{{.Action.Label}} · {{.Guest.Name}} <span class="muted">· {{.Guest.TypeLabel}} {{.Guest.VMID}} sur {{.Guest.Node}}</span></h1>
     {{with .Det}}<p class="muted">D'après la détection {{age .At}} ({{date .At}}). <a href="/taches/{{.JobID}}">journal</a></p>{{end}}
   </div>
   {{if .Guest.Critical}}<span class="b c">invité critique</span>{{end}}

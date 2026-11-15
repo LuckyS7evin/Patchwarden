@@ -110,7 +110,7 @@ func TestSnapshotThenUpdate(t *testing.T) {
 	if !strings.Contains(e.snaps(t), "PatchWarden avant « tout mettre à jour »") {
 		t.Errorf("description absente ou mal décodée : %q", e.snaps(t))
 	}
-	if !strings.Contains(log, "points de montage liés") {
+	if !strings.Contains(log, "volumes hors stockage Proxmox") {
 		t.Errorf("avertissement bind mount absent :\n%s", log)
 	}
 	det, _ := e.eng.Store.Get(e.guest.Key())

@@ -222,7 +222,7 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | 4 ✅ | Détection planifiée (1), notifications (2), vue sécurité (3) |
 | 5 ✅ | Snapshots avant mise à jour (exigence initiale), retour arrière en un clic (5) |
 | 6 ✅ | Lots, regroupement par tags (6), redémarrages requis (8) |
-| 7 | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
+| 7 ✅ | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
 | 8 | Docker via l'API Portainer |
 | 9 | Vérification après mise à jour (4), fenêtres de maintenance (9), sécurité automatique (10, après les snapshots), métriques Prometheus (11) |
 
@@ -296,6 +296,17 @@ sinon) plutôt que des encadrés.
 | Anciennes bibliothèques | Détection : processus dont `/proc/<pid>/maps` contient une bibliothèque `.so … (deleted)`, rattachés à leur service par `/proc/<pid>/cgroup`. Sans dépendance (needrestart non requis) |
 | Redémarrer les services | Liste refaite dans le CT au moment de l'action (PatchWarden n'envoie aucun nom) ; dbus, `systemd-*`, `user@`, consoles exclus : pour eux, redémarrage du CT conseillé |
 | Redémarrer le CT | `pct reboot` (arrêt propre), attente du redémarrage, détection ; nom à saisir pour un invité critique |
+
+## Jalon 7 : VM, OMV, PBS, fin de support (16/11/2026)
+
+| Sujet | Décision |
+| :--- | :--- |
+| Wrapper | Un seul jeu de verbes, préfixe `lxc-` ou `vm-` ; fonctions communes (`g_sh`, `g_stream`, état, snapshots) qui appellent `pct` ou `qm`. Pas de `versions` ni `cs-update` pour une VM |
+| Exécution dans une VM | `qm guest exec --pass-stdin` (jamais de gros argument, cf. sonde n° 2) ; sortie décodée deux fois (latin-1 puis UTF-8). Opérations longues : script déposé dans `/var/tmp`, lancé en arrière-plan (`setsid`), journal relu par décalage toutes les 2 s, code de sortie dans un fichier ; fichiers supprimés à la fin |
+| Agent absent | Vérifié avant chaque opération (`qm agent ping`) : code 4 et message expliquant quoi installer et activer |
+| Snapshots de VM | `qm snapshot` sans état de la RAM (l'agent fige les systèmes de fichiers) ; disques en passthrough : snapshot impossible, signalé |
+| Produits particuliers | Reconnus par leurs paquets (`pve-manager`, `proxmox-backup-server`, `openmediavault`). PVE : jamais mis à jour ni redémarré. PBS : `apt-get dist-upgrade`. OMV : `omv-upgrade`. Les deux : nom à saisir, hors lots, refus si un paquet serait supprimé (vérifié par le plan et par le wrapper) |
+| Fin de support | Table intégrée (Debian avec LTS, Ubuntu avec Ubuntu Pro, Alpine) rafraîchie en arrière-plan depuis endoflife.date ; une page n'attend jamais le réseau. Alerte 180 jours avant la fin du support standard ; « critique » quand plus aucun correctif n'est publié |
 
 ## Questions encore ouvertes
 

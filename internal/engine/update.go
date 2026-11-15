@@ -77,6 +77,9 @@ type Plan struct {
 	Bump             bool
 	// NeedName : invité critique, le nom doit être saisi pour confirmer.
 	NeedName bool
+	// AptMode : mode du verbe apt quand il diffère de l'action (dist pour
+	// PBS, omv pour OpenMediaVault).
+	AptMode string
 	// Snap : snapshot proposé avant la mise à jour.
 	Snap SnapPlan
 }
@@ -109,6 +112,13 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 		return p
 	}
 	p.Det = &det
+	if det.Special == "pve" {
+		p.Blockers = append(p.Blockers, "Proxmox VE est installé dans cet invité : PatchWarden ne met jamais à jour un hôte Proxmox")
+		return p
+	}
+	if det.Special != "" {
+		p.NeedName = true
+	}
 	if age := time.Since(det.At); age > MaxDetectionAge {
 		p.Blockers = append(p.Blockers, fmt.Sprintf("dernière détection trop ancienne (%s) : relancez-la", age.Round(time.Hour)))
 	}
@@ -144,14 +154,21 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 		}
 	case ActFull:
 		p.Packages = det.Apt.Packages
-		p.Steps = append(p.Steps,
-			"apt-get update",
-			fmt.Sprintf("apt-get --with-new-pkgs upgrade : %d paquet(s), dont %d de sécurité (aucune suppression)", det.Apt.Total, det.Apt.Security))
-		if det.Apt.DistTotal > det.Apt.Total {
+		switch det.Special {
+		case "omv", "pbs":
+			e.planSpecial(&p, det)
+		default:
+			p.Steps = append(p.Steps,
+				"apt-get update",
+				fmt.Sprintf("apt-get --with-new-pkgs upgrade : %d paquet(s), dont %d de sécurité (aucune suppression)", det.Apt.Total, det.Apt.Security))
+		}
+		if det.Special == "" && det.Apt.DistTotal > det.Apt.Total {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("%d paquet(s) ne passent qu'avec un dist-upgrade (qui peut supprimer des paquets) : non appliqués", det.Apt.DistTotal-det.Apt.Total))
 		}
-		e.planCS(&p, det)
-		if det.Apt.Total == 0 && !p.CSRun {
+		if g.Type == "lxc" {
+			e.planCS(&p, det)
+		}
+		if det.Apt.Total == 0 && det.Apt.DistTotal == 0 && !p.CSRun {
 			p.Blockers = append(p.Blockers, "rien à mettre à jour")
 		}
 	}
@@ -337,7 +354,10 @@ func (e *Engine) updateFunc(p Plan, dryRun, snapshot bool, user string) jobs.Fun
 		}
 
 		// 1. apt
-		cmd := fmt.Sprintf("lxc-apt %d %s %s", g.VMID, mode, dry)
+		if p.AptMode != "" {
+			mode = p.AptMode
+		}
+		cmd := fmt.Sprintf("%s %d %s %s", verb(g, "apt"), g.VMID, mode, dry)
 		log(false, "▶ "+cmd)
 		out, errs, code, err := e.run(ctx, g.Node, cmd, log)
 		if err != nil {
@@ -559,4 +579,25 @@ func needsRerun(lines []string) bool {
 		}
 	}
 	return false
+}
+
+// planSpecial : « tout mettre à jour » pour PBS (apt-get dist-upgrade,
+// méthode recommandée par Proxmox) et OpenMediaVault (omv-upgrade). Refusé
+// si des paquets seraient supprimés.
+func (e *Engine) planSpecial(p *Plan, det detect.Result) {
+	n := max(det.Apt.DistTotal, det.Apt.Total)
+	p.Steps = append(p.Steps, "apt-get update")
+	switch det.Special {
+	case "omv":
+		p.AptMode = "omv"
+		p.Steps = append(p.Steps, fmt.Sprintf("omv-upgrade (méthode OpenMediaVault : dist-upgrade puis déploiement de la configuration par omv-salt) : %d paquet(s), dont %d de sécurité", n, det.Apt.Security))
+		p.Warnings = append(p.Warnings, "OpenMediaVault : les services (partages, montages) peuvent être relancés pendant le déploiement de la configuration")
+	case "pbs":
+		p.AptMode = "dist"
+		p.Steps = append(p.Steps, fmt.Sprintf("apt-get dist-upgrade (méthode recommandée par Proxmox pour PBS) : %d paquet(s), dont %d de sécurité", n, det.Apt.Security))
+		p.Warnings = append(p.Warnings, "Proxmox Backup Server : vérifiez qu'aucune sauvegarde, vérification ou synchronisation n'est en cours")
+	}
+	if det.Apt.DistRemove > 0 {
+		p.Blockers = append(p.Blockers, fmt.Sprintf("la mise à jour supprimerait %d paquet(s) : à faire à la main sur %s", det.Apt.DistRemove, det.SpecialLabel()))
+	}
 }

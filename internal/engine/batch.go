@@ -49,7 +49,7 @@ func (o Op) Label() string {
 	case OpServices:
 		return "redémarrer les services"
 	case OpReboot:
-		return "redémarrer le CT"
+		return "redémarrer l'invité"
 	}
 	return string(o)
 }
@@ -257,6 +257,9 @@ func (e *Engine) checkOp(r BatchRequest) string {
 	g := r.Guest
 	if g.Critical {
 		return "invité à confirmation renforcée (" + g.CriticalReason + ") : à lancer depuis sa fiche"
+	}
+	if det, ok := e.Store.Get(target(g).Key()); ok && det.Special != "" {
+		return det.SpecialLabel() + " : à lancer depuis sa fiche (confirmation renforcée)"
 	}
 	switch r.Op {
 	case OpSecurity, OpFull:

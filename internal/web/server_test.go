@@ -17,6 +17,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/config"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
+	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"golang.org/x/crypto/bcrypt"
@@ -99,7 +100,7 @@ func (f *fakeEngine) SnapDefaults() engine.SnapConfig { return engine.SnapConfig
 
 func (f *fakeEngine) PlanRestart(g inventory.Guest) engine.RestartPlan {
 	p := engine.RestartPlan{Guest: g, NeedName: g.Critical}
-	if g.Type != "lxc" || g.Status != "running" {
+	if g.Status != "running" {
 		p.Why = "non éligible"
 		return p
 	}
@@ -159,6 +160,10 @@ func (f *fakeEngine) Get(id string) (engine.Batch, bool) {
 }
 
 func (f *fakeEngine) List(int) []engine.Batch { return f.batches }
+
+func (f *fakeEngine) OSSupport(r detect.Result) eol.Status {
+	return eol.New("", nil).Status(r.OSID, r.OSVersion, time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC))
+}
 
 func (f *fakeEngine) Execute(g inventory.Guest, a engine.Action, dry bool, user string, confirmed bool, name string, snapshot bool) (jobs.Job, error) {
 	f.lastSnap = &snapshot
@@ -903,5 +908,36 @@ func TestSnapshotImpossibleShown(t *testing.T) {
 	_, body := h.do("GET", "/invites/loki/203/action/securite", nil, nil)
 	if !strings.Contains(body, "Impossible : le stockage de ce CT ne permet pas les snapshots") || strings.Contains(body, `name="snapshot" value="1"`) {
 		t.Errorf("snapshot impossible mal affiché")
+	}
+}
+
+func TestVMsSpecialAndOSSupport(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_, inv := h.do("GET", "/inventaire", nil, nil)
+	if strings.Contains(inv, "prochain jalon") {
+		t.Error("les VM sont prises en charge : plus de « prochain jalon »")
+	}
+	_ = h.store.Put("loki/203", detect.Result{At: h.now, OSID: "debian", OSVersion: "11", OSPretty: "Debian GNU/Linux 11 (bullseye)",
+		Apt: detect.Apt{Present: true, Total: 2, Security: 1}, Special: "pbs", SpecialVersion: "3.4.1"})
+	_, inv = h.do("GET", "/inventaire", nil, nil)
+	for _, want := range []string{"OS sans support", "Proxmox Backup Server"} {
+		if !strings.Contains(inv, want) {
+			t.Errorf("inventaire sans %q", want)
+		}
+	}
+	_, fiche := h.do("GET", "/invites/loki/203", nil, nil)
+	for _, want := range []string{"plus aucun correctif de sécurité depuis le 31/08/2026", "Proxmox Backup Server 3.4.1", "hors lots"} {
+		if !strings.Contains(fiche, want) {
+			t.Errorf("fiche sans %q", want)
+		}
+	}
+	_, todo := h.do("GET", "/", nil, nil)
+	if !strings.Contains(todo, "Debian 11 : plus aucun correctif") || strings.Contains(todo, `value="loki/203:securite"`) {
+		t.Error("« À traiter » : fin de support attendue, et pas de sélection pour PBS")
+	}
+	_, rb := h.do("GET", "/invites/loki/203/redemarrage?quoi=ct", nil, nil)
+	if !strings.Contains(rb, "Redémarrer la VM") || !strings.Contains(rb, "qm reboot") {
+		t.Error("page de redémarrage d'une VM")
 	}
 }

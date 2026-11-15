@@ -3,7 +3,7 @@
 {{with .Row}}
 <p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></p>
 <div class="pagehead">
-  <div><h1>{{if eq $.What "services"}}Redémarrer les services{{else}}Redémarrer le CT{{end}} · {{.Name}} <span class="muted">· {{.TypeLabel}} {{.VMID}} sur {{.Node}}</span></h1></div>
+  <div><h1>{{if eq $.What "services"}}Redémarrer les services{{else}}Redémarrer {{guestNoun .Type}}{{end}} · {{.Name}} <span class="muted">· {{.TypeLabel}} {{.VMID}} sur {{.Node}}</span></h1></div>
 </div>
 {{end}}
 {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
@@ -14,8 +14,8 @@
   <p class="small">Après une mise à jour, un programme déjà lancé continue d'utiliser l'ancienne version d'une bibliothèque (correctif de sécurité non actif) tant qu'il n'est pas redémarré.</p>
   <dl class="kv">
     {{if .Units}}<dt>Services</dt><dd>{{range .Units}}<span class="b w">{{.}}</span>{{end}}</dd>{{end}}
-    {{if .Excluded}}<dt>Services système</dt><dd>{{range .Excluded}}<span class="b">{{.}}</span>{{end}} <span class="muted small">jamais redémarrés seuls : redémarrez le CT</span></dd>{{end}}
-    {{if .Procs}}<dt>Autres processus</dt><dd>{{range .Procs}}<span class="b">{{.}}</span>{{end}} <span class="muted small">hors service : redémarrez le CT</span></dd>{{end}}
+    {{if .Excluded}}<dt>Services système</dt><dd>{{range .Excluded}}<span class="b">{{.}}</span>{{end}} <span class="muted small">jamais redémarrés seuls : redémarrez {{guestNoun $.Row.Type}}</span></dd>{{end}}
+    {{if .Procs}}<dt>Autres processus</dt><dd>{{range .Procs}}<span class="b">{{.}}</span>{{end}} <span class="muted small">hors service : redémarrez {{guestNoun $.Row.Type}}</span></dd>{{end}}
     <dt>Fichier reboot-required</dt><dd>{{if .Required}}<span class="b w">présent</span>{{else}}absent{{end}}</dd>
   </dl>
   {{if and (not .Units) (not .Excluded) (not .Procs) (not .Required)}}<p class="muted">Rien à redémarrer d'après la dernière détection.</p>{{end}}
@@ -29,28 +29,28 @@
   <h2>Ce qui va se passer</h2>
   {{if eq .What "services"}}
   <ol class="steps">
-    <li>dans le CT, la liste est établie à nouveau (rien n'est transmis par PatchWarden) ;</li>
+    <li>dans l'invité, la liste est établie à nouveau (rien n'est transmis par PatchWarden) ;</li>
     <li><code>systemctl restart</code> pour chaque service, sauf les services système ;</li>
     <li>une détection vérifie le résultat.</li>
   </ol>
   <p class="small">Coupure brève de chaque service redémarré.</p>
   {{else}}
   <ol class="steps">
-    <li><code>pct reboot</code> : arrêt propre puis démarrage du CT ;</li>
-    <li>attente que le CT soit de nouveau démarré ;</li>
+    <li><code>{{if eq .Row.Type "qemu"}}qm{{else}}pct{{end}} reboot</code> : arrêt propre puis démarrage ;</li>
+    <li>attente que l'invité soit de nouveau démarré{{if eq .Row.Type "qemu"}} et que son agent réponde{{end}} ;</li>
     <li>une détection vérifie le résultat.</li>
   </ol>
-  <p class="small">Le CT et ses applications sont indisponibles pendant le redémarrage (souvent moins d'une minute).</p>
+  <p class="small">L'invité et ses applications sont indisponibles pendant le redémarrage{{if eq .Row.Type "qemu"}} (une VM met souvent une à deux minutes){{else}} (souvent moins d'une minute){{end}}.</p>
   {{end}}
   <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/redemarrage?quoi={{.What}}" class="launch-box apply spaced">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label class="check"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : {{if eq .What "services"}}redémarrer ces services{{else}}redémarrer le CT{{end}} sur <strong>{{.Row.Name}}</strong></span></label>
+    <label class="check"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : {{if eq .What "services"}}redémarrer ces services{{else}}redémarrer {{guestNoun .Row.Type}}{{end}} sur <strong>{{.Row.Name}}</strong></span></label>
     {{if and (ne .What "services") .Plan.NeedName}}
     <label>Invité critique : saisissez son nom (<code>{{.Row.Name}}</code>)
       <input name="nom" required autocomplete="off">
     </label>
     {{end}}
-    <button type="submit" class="btn d"{{if and (eq .What "services") (not .Plan.CanServices)}} disabled{{end}}>{{if eq .What "services"}}Redémarrer les services{{else}}Redémarrer le CT{{end}}</button>
+    <button type="submit" class="btn d"{{if and (eq .What "services") (not .Plan.CanServices)}} disabled{{end}}>{{if eq .What "services"}}Redémarrer les services{{else}}Redémarrer {{guestNoun .Row.Type}}{{end}}</button>
   </form>
 </section>
 {{end}}

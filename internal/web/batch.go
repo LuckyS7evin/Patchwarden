@@ -103,7 +103,7 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 		d.Source = "tag « " + tag + " » · " + op.Label()
 		snap, _ := s.inv.Current()
 		for _, g := range snap.Guests {
-			if g.Type != "lxc" || !hasTag(g.Tags, tag) {
+			if (g.Type != "lxc" && g.Type != "qemu") || !hasTag(g.Tags, tag) {
 				continue
 			}
 			rw := s.rowFor(g)

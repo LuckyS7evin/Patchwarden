@@ -19,9 +19,11 @@
   {{- range .Apps}}{{if .UpdateAvailable}}<span class="b {{if .MajorChange}}v{{else}}w{{end}}" title="{{.Installed}} → {{.Latest}}">{{.Name}} → {{.Latest}}</span>{{end}}{{end}}
   {{- if .RebootRequired}}<span class="b w">redémarrage</span>{{end}}
   {{- with .RestartUnits}}<span class="b w" title="Services liés à d'anciennes bibliothèques">{{len .}} service(s) à redémarrer</span>{{end}}
+  {{- if .SpecialLabel}}<span class="b a" title="{{.SpecialLabel}} {{.SpecialVersion}}">{{.SpecialLabel}}</span>{{end}}{{end}}
+  {{- if eq $.OS.Level "crit"}}<span class="b c" title="{{$.OS.Name}} : {{$.OS.Text}}">OS sans support</span>{{else if eq $.OS.Level "warn"}}<span class="b w" title="{{$.OS.Name}} : {{$.OS.Text}}">fin de support</span>{{end}}{{with .Det}}
   {{- if and (not .Apt.Total) (not .AppUpdates) (not .RebootRequired) (not .RestartUnits)}}<span class="b ok">à jour</span>{{end}}
   {{- if .Snap.PW}}<span class="b v" title="Snapshot PatchWarden à supprimer une fois la mise à jour validée">◉ snapshot</span>{{end}}{{end}}
-{{else if eq .Status "running"}}{{if eq .Type "lxc"}}<span class="muted">non détecté</span>{{else}}<span class="muted">VM : prochain jalon</span>{{end}}
+{{else if eq .Status "running"}}<span class="muted">non détecté</span>
 {{else}}<span class="muted">ignoré ({{statusLabel .Status}})</span>{{end}}{{end}}
 
 {{define "ico-box"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/></svg>{{end}}

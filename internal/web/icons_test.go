@@ -81,7 +81,7 @@ func TestIconStoreAndHandler(t *testing.T) {
 	if resp.Header.Get("Content-Type") != "image/svg+xml" || !strings.Contains(body, ">&lt;<") || strings.Contains(body, "<b>") {
 		t.Errorf("repli sur l'initiale : %q", body)
 	}
-	_, inv := h.do("GET", "/", nil, nil)
+	_, inv := h.do("GET", "/inventaire", nil, nil)
 	if !strings.Contains(inv, `src="/icones?l=termix&amp;n=termix"`) {
 		t.Error("icône absente de l'inventaire")
 	}

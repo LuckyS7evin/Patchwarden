@@ -272,11 +272,11 @@ func TestUnauthenticatedIsRedirected(t *testing.T) {
 func TestLoginAndInventoryPage(t *testing.T) {
 	h := newHarness(t)
 	h.login()
-	resp, body := h.do("GET", "/", nil, nil)
+	resp, body := h.do("GET", "/inventaire", nil, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("inventaire : %d", resp.StatusCode)
 	}
-	for _, want := range []string{"termix", "community-scripts", "confirmation renforcée", "tag « critique »", "il y a 5 min", "odin : délai dépassé", "&lt;script&gt;", "(nom indisponible)", ">inconnu<", "pvestatd sur tyr", "Prochaine détection automatique : 15/11 à 03:40"} {
+	for _, want := range []string{"termix", ">critique<", "tag « critique »", "il y a 5 min", "odin : délai dépassé", "&lt;script&gt;", "(nom indisponible)", "inconnu</span>", "pvestatd sur tyr", "Prochaine détection : 15/11 à 03:40"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%q absent de la page", want)
 		}
@@ -297,11 +297,11 @@ func TestLoginAndInventoryPage(t *testing.T) {
 func TestFilter(t *testing.T) {
 	h := newHarness(t)
 	h.login()
-	_, body := h.do("GET", "/?type=lxc", nil, nil)
+	_, body := h.do("GET", "/inventaire?type=lxc", nil, nil)
 	if !strings.Contains(body, "termix") || strings.Contains(body, ">PBS<") {
 		t.Error("filtre par type inopérant")
 	}
-	_, body = h.do("GET", "/?q=203", nil, nil)
+	_, body = h.do("GET", "/inventaire?q=203", nil, nil)
 	if !strings.Contains(body, ">PBS<") || strings.Contains(body, ">termix<") {
 		t.Error("recherche par ID inopérante")
 	}
@@ -337,7 +337,7 @@ func TestCSRFAndOrigin(t *testing.T) {
 		t.Fatal("rafraîchissement déclenché malgré le refus")
 	}
 	resp, _ := h.do("POST", "/inventaire/rafraichir?type=lxc", url.Values{"csrf": {tok}}, map[string]string{"Origin": h.ts.URL})
-	if resp.StatusCode != http.StatusSeeOther || h.inv.triggered != 1 || resp.Header.Get("Location") != "/?type=lxc" {
+	if resp.StatusCode != http.StatusSeeOther || h.inv.triggered != 1 || resp.Header.Get("Location") != "/inventaire?type=lxc" {
 		t.Errorf("rafraîchissement légitime : %d, déclenché %d, %s", resp.StatusCode, h.inv.triggered, resp.Header.Get("Location"))
 	}
 }
@@ -472,15 +472,25 @@ func TestGuestPage(t *testing.T) {
 			ChangelogURL: "https://github.com/Termix-SSH/Termix/releases/tag/v26.11.1"}},
 	})
 	_, body := h.do("GET", "/invites/loki/104", nil, nil)
-	for _, want := range []string{"Debian GNU/Linux 13", "ancien format", "augmentation temporaire", "Update Nginx configuration?",
+	for _, want := range []string{"Debian GNU/Linux 13", "ancien format", "augmentation temporaire",
 		"release-2.6.1-tag", "v26.11.1", `href="https://github.com/Termix-SSH/Termix/releases/tag/v26.11.1"`,
-		"mise à jour disponible", "80 %", "1 correctif(s) de sécurité ne passent pas seuls", "libssl3t64", "il y a 10 min"} {
+		`class="tv n`, "limite : 80 %", "il y a 10 min", `href="/invites/loki/104?onglet=paquets"`, "à renseigner"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page invité sans %q", want)
 		}
 	}
-	_, inv := h.do("GET", "/", nil, nil)
-	for _, want := range []string{"3 apt · 2 sécu", "termix → v26.11.1", "Détecter les mises à jour (1 LXC)"} {
+	_, pk := h.do("GET", "/invites/loki/104?onglet=paquets", nil, nil)
+	for _, want := range []string{"1 correctif(s) de sécurité ne passent pas seuls", "libssl3t64", "base-files"} {
+		if !strings.Contains(pk, want) {
+			t.Errorf("onglet paquets sans %q", want)
+		}
+	}
+	_, qs := h.do("GET", "/invites/loki/104?onglet=questions", nil, nil)
+	if !strings.Contains(qs, "Update Nginx configuration?") {
+		t.Error("onglet questions sans la question du script")
+	}
+	_, inv := h.do("GET", "/inventaire", nil, nil)
+	for _, want := range []string{"2 sécu", "3 apt", "termix → v26.11.1", "Détecter tout (1)"} {
 		if !strings.Contains(inv, want) {
 			t.Errorf("inventaire sans %q", want)
 		}
@@ -496,10 +506,13 @@ func TestUpdateFlow(t *testing.T) {
 	_ = h.store.Put("loki/104", detect.Result{At: h.now, CS: detect.CS{Script: "termix", Prompts: []string{nginxQ}}, Apt: detect.Apt{Present: true}})
 
 	_, page := h.do("GET", "/invites/loki/104", nil, nil)
-	for _, want := range []string{"Mettre à jour", `href="/invites/loki/104/action/securite"`, "btn-disabled", "à renseigner", nginxQ} {
+	for _, want := range []string{"Tout mettre à jour", `href="/invites/loki/104/action/securite"`, `aria-disabled="true"`, "à renseigner"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page invité sans %q", want)
 		}
+	}
+	if _, q := h.do("GET", "/invites/loki/104?onglet=questions", nil, nil); !strings.Contains(q, nginxQ) {
+		t.Error("onglet questions sans la question")
 	}
 	tok := h.csrf()
 
@@ -573,26 +586,96 @@ func TestCriticalConfirmation(t *testing.T) {
 	}
 }
 
-func TestSecurityPage(t *testing.T) {
+func TestTodoPage(t *testing.T) {
 	h := newHarness(t)
 	h.login()
 	old := h.now.Add(-72 * time.Hour)
-	_ = h.store.Put("loki/104", detect.Result{At: h.now.Add(-time.Hour), Apt: detect.Apt{Present: true, Security: 2, SecurityStrict: 1, StrictPackages: []string{"libssl3t64"}, Packages: []detect.Package{
+	_ = h.store.Put("loki/104", detect.Result{At: h.now.Add(-time.Hour), Apt: detect.Apt{Present: true, Total: 3, Security: 2, SecurityStrict: 1, StrictPackages: []string{"libssl3t64"}, Packages: []detect.Package{
 		{Name: "libssl3t64", Old: "1", New: "2", Security: true, Since: old},
 		{Name: "curl", Old: "1", New: "2", Security: true, Since: h.now.Add(-time.Hour)},
 		{Name: "bash", Old: "1", New: "2"},
-	}}})
-	_, body := h.do("GET", "/securite", nil, nil)
-	for _, want := range []string{"2</span> correctifs de sécurité", "1</span> invité(s) concerné(s)", "termix", "il y a 3 jours", "libssl3t64", "curl", "1 paquet(s)", "1 correctif(s) seulement avec", `href="/invites/loki/104/action/securite"`} {
+	}}, Apps: []detect.App{{Name: "termix", Installed: "1.0.0", InstalledKnown: true, Latest: "2.0.0", Since: old}}})
+	_, body := h.do("GET", "/", nil, nil)
+	for _, want := range []string{"À traiter", ">2</b>correctifs de sécurité", "termix", "depuis 3 j", ">libssl3t64<", ">curl<", "2 correctifs",
+		`value="loki/104:securite"`, "Versions majeures", `value="loki/104:complet"`, "Simuler la sélection"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("page sécurité sans %q", want)
+			t.Errorf("« À traiter » sans %q", want)
 		}
 	}
 	if strings.Contains(body, ">bash<") {
-		t.Error("un paquet non lié à la sécurité ne doit pas apparaître")
+		t.Error("un paquet non lié à la sécurité ne doit pas apparaître dans le groupe Sécurité")
 	}
-	if !strings.Contains(body, "VM non couvertes") {
-		t.Error("les VM doivent être signalées comme non couvertes")
+	if resp, _ := h.do("GET", "/securite", nil, nil); resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "/" {
+		t.Errorf("ancienne page sécurité : %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+
+	// Simulation par lot : un seul passage par invité, en « tout mettre à jour ».
+	_ = h.eng.SetAnswers("loki/104", map[string]string{nginxQ: "y"})
+	tok := h.csrf()
+	resp, _ := h.do("POST", "/lot/simuler", url.Values{"csrf": {tok}, "sel": {"loki/104:securite", "loki/104:complet", "loki/9999:securite", "nimportequoi"}}, nil)
+	if loc := resp.Header.Get("Location"); loc != "/taches?simulations=1&ignores=1" {
+		t.Errorf("simulation par lot : %s", loc)
+	}
+	list := h.jm.List("loki/104", 10)
+	if len(list) != 1 || !list[0].DryRun || list[0].Kind != jobs.KindFull {
+		t.Errorf("tâches : %+v", list)
+	}
+	resp, _ = h.do("POST", "/lot/simuler", url.Values{"csrf": {tok}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "erreur=") {
+		t.Errorf("lot vide : %s", resp.Header.Get("Location"))
+	}
+}
+
+func TestShellPreviewSettings(t *testing.T) {
+	h := newHarness(t)
+	h.srv.cfg.Notify = []config.Notify{{Type: "ntfy", URL: "https://ntfy.sh/sujet-tres-secret?auth=jeton", Events: []string{"echec"}}}
+	h.srv.cfg.Proxmox = []config.Endpoint{{Name: "loki", URL: "https://pve:8006", TokenID: "patchwarden@pve!inventaire", TokenSecret: "s3cret-du-jeton"}}
+	snap := h.inv.snap
+	snap.NodeStats = map[string]inventory.NodeStat{"loki": {Name: "loki", Online: true, CPU: .23, MemUsed: 61, MemTotal: 100, Storage: "local-lvm", StorageType: "lvmthin", StorageUsed: 82, StorageTotal: 100}}
+	h.inv.snap = snap
+	h.login()
+	_, body := h.do("GET", "/inventaire", nil, nil)
+	for _, want := range []string{"Stockage", "82 %", `class="fg w" width="82"`, "23 %"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("menu des nœuds sans %q", want)
+		}
+	}
+	if strings.Contains(body, "style=") {
+		t.Error("style en ligne : interdit par la CSP")
+	}
+	resp, frag := h.do("GET", "/invites/loki/104/apercu", nil, nil)
+	if resp.StatusCode != 200 || !strings.Contains(frag, "Ouvrir la fiche complète") || strings.Contains(frag, "<html") || strings.Contains(frag, "class=\"side\"") {
+		t.Errorf("aperçu : %d", resp.StatusCode)
+	}
+	_, set := h.do("GET", "/reglages", nil, nil)
+	if strings.Contains(set, "sujet-tres-secret") || strings.Contains(set, "jeton") && strings.Contains(set, "auth=") || strings.Contains(set, "s3cret-du-jeton") {
+		t.Error("secret affiché dans les réglages")
+	}
+	if !strings.Contains(set, "https://ntfy.sh/…") || !strings.Contains(set, "défini (masqué)") {
+		t.Error("réglages incomplets")
+	}
+}
+
+func TestStepsFromLog(t *testing.T) {
+	j := jobs.Job{Kind: jobs.KindFull, Status: jobs.Running, Target: jobs.Target{Node: "loki"}}
+	var lines []jobs.Line
+	for _, l := range []string{"  0. snapshot avant toute modification", "  2. apt-get --with-new-pkgs upgrade : 3 paquet(s)", "  3. update community-scripts (ct/termix.sh), sans terminal : termix",
+		"▶ lxc-snapshot 104 pw-20261115-0141-complet 1 90 0 <description>", "pw.node_log=/var/log/patchwarden/104-x-snapshot.log", "snap.info=1", "▶ lxc-apt 104 full 0", "pw.apt_rc=0", "▶ lxc-cs-update 104 y 4 4096"} {
+		lines = append(lines, jobs.Line{Text: l})
+	}
+	st := stepsFor(j, lines)
+	if len(st) != 4 || st[0].State != "fait" || st[1].State != "fait" || st[2].State != "encours" || st[3].State != "" || st[0].Detail != "pw-20261115-0141-complet" {
+		t.Fatalf("étapes : %+v", st)
+	}
+	j.Status = jobs.Failed
+	if st := stepsFor(j, lines); st[2].State != "echec" {
+		t.Errorf("échec non reporté : %+v", st[2])
+	}
+	if nodeLog(j, lines) != "loki:/var/log/patchwarden/104-x-snapshot.log" || takenSnapshot(j, lines) != "pw-20261115-0141-complet" {
+		t.Error("journal du nœud ou snapshot pris")
+	}
+	if stepsFor(jobs.Job{Kind: jobs.KindDetect}, lines) != nil {
+		t.Error("pas d'étapes pour une détection")
 	}
 }
 
@@ -627,14 +710,14 @@ func TestSnapshotUI(t *testing.T) {
 	if err := h.store.Put("loki/104", det); err != nil {
 		t.Fatal(err)
 	}
-	_, body = h.do("GET", "/invites/loki/104", nil, nil)
+	_, body = h.do("GET", "/invites/loki/104?onglet=snapshots", nil, nil)
 	for _, want := range []string{"pw-20261115-0141-complet", "/snapshots/pw-20261115-0141-complet/restaurer", "2 snapshot(s) manuel(s), jamais touchés", "local-lvm (lvmthin) : 45 %", "jamais cochée d'office"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page de l'invité sans %q", want)
 		}
 	}
-	_, body = h.do("GET", "/", nil, nil)
-	if !strings.Contains(body, "1 snapshot PW") {
+	_, body = h.do("GET", "/inventaire", nil, nil)
+	if !strings.Contains(body, "◉ snapshot") {
 		t.Error("badge de snapshot absent de l'inventaire")
 	}
 	resp, _ = h.do("POST", "/invites/loki/104/snapshots/reglage", url.Values{"csrf": {csrf}, "reglage": {"toujours"}}, nil)

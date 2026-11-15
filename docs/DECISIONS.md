@@ -265,6 +265,24 @@ décodage. Avertissement LVM vu au passage : le pool thin `pve/data` est surrés
 (192 Gio de volumes pour un pool plus petit) ; s'il se remplit, tous les invités dessus
 sont touchés.
 
+## Refonte de l'interface (15/11/2026)
+
+Trois maquettes proposées (console, tuiles, file d'actions) ; retenu : la file d'actions
+comme accueil, l'inventaire et le tiroir d'aperçu de la console, la fiche de l'invité des
+tuiles, en clair et en sombre avec sélecteur. Versions d'une appli : frise « installée →
+disponible » (point gris, trait, point coloré ; violet pour une version majeure, orange
+sinon) plutôt que des encadrés.
+
+| Sujet | Décision |
+| :--- | :--- |
+| Technique | Inchangée : rendu serveur (`html/template`), CSS écrit à la main, trois petits scripts (thème, tiroir et sélection, suivi des tâches), aucune dépendance. CSP stricte conservée : jauges en SVG (attributs) au lieu de styles en ligne |
+| Sans JavaScript | Tout reste utilisable : une ligne de l'inventaire mène à la fiche, la barre de sélection reste visible, le journal se recharge |
+| Accueil « À traiter » | Groupes : Sécurité (plus anciens d'abord), Versions majeures, Applications, Autres paquets, Entretien (redémarrage, snapshot à supprimer, détection absente ou de plus de 48 h). Remplace la page Sécurité (`/securite` redirige) |
+| Lots | Sélection multiple dès maintenant, mais **simulation seulement** ; un invité coché en « sécurité » et en « tout » n'est simulé qu'une fois, en « tout ». Lots réels au jalon 6 |
+| État des nœuds | `/cluster/resources` lu en entier (invités, nœuds, stockages) : mêmes droits `PVEAuditor`. Stockage affiché : le non partagé accueillant des disques d'invités (`rootdir` ou `images`) le plus rempli. Nœud injoignable : dernières valeurs, grisées |
+| Étapes d'une tâche | Déduites du journal par des marqueurs (`▶ lxc-apt`, `pw.apt_rc=`…), mêmes règles côté serveur et dans le navigateur |
+| Réglages | Lecture seule ; secrets jamais affichés (jetons : « défini (masqué) » ou nom de la variable ; URL de notification réduite à l'hôte, le sujet ntfy valant secret) |
+
 ## Questions encore ouvertes
 
 7. Types de stockage par nœud ; disques en passthrough sur OMV (la sonde le montre).

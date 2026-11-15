@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
@@ -59,74 +58,17 @@ func (s *Server) detectAll(w http.ResponseWriter, r *http.Request, se *session) 
 	http.Redirect(w, r, fmt.Sprintf("/taches?lancees=%d&ignores=%d", started, skipped), http.StatusSeeOther)
 }
 
-type guestData struct {
-	base
-	Row     row
-	Error   string
-	Notice  string
-	Jobs    []jobs.Job
-	Plans   []engine.Plan
-	Answers []engine.PromptAnswer
-	// Paquets séparés pour l'affichage.
-	SecurityPkgs, OtherPkgs []detect.Package
-	StrictMissing           int
-	// Snapshots : réglage de l'invité, réglage global, actions possibles.
-	SnapPref     string
-	SnapDefaults engine.SnapConfig
-	SnapWhy      string // retour arrière / suppression impossibles : pourquoi
-}
-
-func (s *Server) guestPage(w http.ResponseWriter, r *http.Request, se *session) {
-	g, ok := s.findGuest(r)
-	if !ok {
-		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
-		return
-	}
-	d := guestData{
-		base:   s.base(fmt.Sprintf("%s (%d)", g.Name, g.VMID), "inventaire", se),
-		Row:    s.rowFor(g),
-		Error:  r.URL.Query().Get("erreur"),
-		Notice: r.URL.Query().Get("info"),
-		Jobs:   s.deps.Jobs.List(g.Key(), 20),
-	}
-	if s.deps.Engine.CanDetect(g) == nil {
-		for _, a := range []engine.Action{engine.ActSecurity, engine.ActFull} {
-			p := s.deps.Engine.PlanFor(g, a)
-			d.Plans = append(d.Plans, p)
-			if a == engine.ActFull {
-				d.Answers = p.Answers
-			}
-		}
-	}
-	d.SnapPref = s.deps.Engine.SnapPref(g.Key())
-	d.SnapDefaults = s.deps.Engine.SnapDefaults()
-	if err := s.deps.Engine.CanSnapAction(g); err != nil {
-		d.SnapWhy = err.Error()
-	}
-	if det := d.Row.Det; det != nil {
-		for _, p := range det.Apt.Packages {
-			if p.Security {
-				d.SecurityPkgs = append(d.SecurityPkgs, p)
-			} else {
-				d.OtherPkgs = append(d.OtherPkgs, p)
-			}
-		}
-		d.StrictMissing = det.Apt.SecurityNotStrict()
-	}
-	s.render(w, "invite", http.StatusOK, d)
-}
-
 type jobsData struct {
 	base
-	Jobs             []jobs.Job
-	Started, Skipped string
-	RunningOrQueued  int
+	Jobs                          []jobs.Job
+	Started, Skipped, Simulations string
+	RunningOrQueued               int
 }
 
 func (s *Server) jobsPage(w http.ResponseWriter, r *http.Request, se *session) {
 	d := jobsData{base: s.base("Tâches", "taches", se), Jobs: s.deps.Jobs.List("", 200)}
 	q := r.URL.Query()
-	d.Started, d.Skipped = q.Get("lancees"), q.Get("ignores")
+	d.Started, d.Skipped, d.Simulations = q.Get("lancees"), q.Get("ignores"), q.Get("simulations")
 	for _, j := range d.Jobs {
 		if !j.Status.Finished() {
 			d.RunningOrQueued++
@@ -137,9 +79,12 @@ func (s *Server) jobsPage(w http.ResponseWriter, r *http.Request, se *session) {
 
 type jobData struct {
 	base
-	Job   jobs.Job
-	Lines []jobs.Line
-	Live  bool
+	Job      jobs.Job
+	Lines    []jobs.Line
+	Live     bool
+	Steps    []stepView
+	NodeLog  string
+	SnapName string
 }
 
 func (s *Server) jobPage(w http.ResponseWriter, r *http.Request, se *session) {
@@ -153,7 +98,8 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request, se *session) {
 		s.log.Error("lecture du journal", "tâche", j.ID, "erreur", err)
 	}
 	s.render(w, "tache", http.StatusOK, jobData{
-		base: s.base("Tâche "+j.ID, "taches", se), Job: j, Lines: lines, Live: !j.Status.Finished(),
+		base: s.base(string(j.Kind)+" · "+j.Target.Name, "taches", se), Job: j, Lines: lines, Live: !j.Status.Finished(),
+		Steps: stepsFor(j, lines), NodeLog: nodeLog(j, lines), SnapName: takenSnapshot(j, lines),
 	})
 }
 

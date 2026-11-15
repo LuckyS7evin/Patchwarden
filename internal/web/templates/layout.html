@@ -9,28 +9,78 @@
 <script src="/static/theme.js"></script>
 </head>
 <body>
-<header class="topbar">
-  <a class="brand" href="/"><img src="/static/icone.svg" alt="" width="22" height="22"> PatchWarden</a>
-  {{if .User}}
-  <nav class="mainnav">
-    <a href="/" {{if eq .Nav "inventaire"}}aria-current="page"{{end}}>Inventaire</a>
-    <a href="/securite" {{if eq .Nav "securite"}}aria-current="page"{{end}}>Sécurité</a>
-    <a href="/taches" {{if eq .Nav "taches"}}aria-current="page"{{end}}>Tâches</a>
-  </nav>
-  <div class="userbox">
-    <button type="button" class="btn btn-link theme-toggle" id="theme-toggle" aria-label="Thème">Thème : auto</button>
-    <span>{{.User}}</span>
-    <form method="post" action="/deconnexion">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button type="submit" class="btn btn-link">Se déconnecter</button>
-    </form>
+{{if .User}}
+<div class="app">
+<nav class="side" aria-label="Navigation principale">
+  <a class="brand" href="/"><i><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></i>PatchWarden</a>
+  <div class="nav">
+    <a href="/" {{if eq .Nav "traiter"}}aria-current="page"{{end}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>À traiter{{with .Shell.Nav.Todo}}<span class="cnt{{if $.Shell.Nav.TodoCrit}} c{{end}}">{{.}}</span>{{end}}</a>
+    <a href="/inventaire" {{if eq .Nav "inventaire"}}aria-current="page"{{end}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Inventaire{{with .Shell.Nav.Guests}}<span class="cnt">{{.}}</span>{{end}}</a>
+    <a href="/snapshots" {{if eq .Nav "snapshots"}}aria-current="page"{{end}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="13" r="4"/><path d="M4 7h3l2-3h6l2 3h3v13H4z"/></svg>Snapshots{{with .Shell.Nav.Snapshots}}<span class="cnt">{{.}}</span>{{end}}</a>
+    <a href="/taches" {{if eq .Nav "taches"}}aria-current="page"{{end}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Tâches{{with .Shell.Nav.Running}}<span class="cnt r">{{.}} en cours</span>{{end}}</a>
+    <a href="/reglages" {{if eq .Nav "reglages"}}aria-current="page"{{end}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg>Réglages</a>
+  </div>
+  {{if .Shell.Nodes}}
+  <div class="sec">Nœuds</div>
+  <div class="nodes">
+  {{range .Shell.Nodes}}
+    <div class="node" title="{{if .Stat.Stale}}Nœud injoignable : valeurs de la lecture précédente{{else if not .HasStat}}État non publié par Proxmox{{end}}">
+      <div class="h"><span class="dot{{if .Stat.Stale}} off{{else if not .HasStat}} unk{{else if not .Stat.Online}} off{{end}}"></span>{{upper .Name}}{{with .Addr}}<span class="ip">{{.}}</span>{{end}}</div>
+      {{if .HasStat}}
+      <div class="bars">
+        <span>CPU</span>{{bar .Stat.CPUPct}}<span>{{.Stat.CPUPct}} %</span>
+        <span>RAM</span>{{bar .Stat.MemPct}}<span>{{.Stat.MemPct}} %</span>
+        {{if .Stat.Storage}}<span title="{{.Stat.Storage}} ({{.Stat.StorageType}})">Stockage</span>{{bar .Stat.StoragePct}}<span>{{.Stat.StoragePct}} %</span>{{end}}
+      </div>
+      {{end}}
+    </div>
+  {{end}}
   </div>
   {{end}}
-</header>
+  <div class="foot">
+    {{with .Shell.NextDetection}}Prochaine détection : {{.}}<br>{{end}}
+    PatchWarden {{.Version}}<br>
+    icônes <a href="https://selfh.st/icons" target="_blank" rel="noopener noreferrer">selfh.st/icons</a> (CC BY 4.0)
+  </div>
+</nav>
 <main>
+  <header class="top">
+    <form class="search" method="get" action="/inventaire" role="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input id="recherche" name="q" value="{{.Search}}" placeholder="Rechercher un invité (nom ou ID)…" aria-label="Rechercher un invité">
+      <span class="kbd" aria-hidden="true">/</span>
+    </form>
+    <span class="sp"></span>
+    <div class="theme" role="group" aria-label="Thème">
+      <button type="button" data-theme-set="auto" hidden>Auto</button>
+      <button type="button" data-theme-set="light" hidden>Clair</button>
+      <button type="button" data-theme-set="dark" hidden>Sombre</button>
+    </div>
+    {{if .Shell.Detectable}}
+    <form method="post" action="/inventaire/detecter">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button type="submit" class="btn p" title="Lecture seule : apt-get update et simulation dans chaque LXC démarré">Détecter tout ({{.Shell.Detectable}})</button>
+    </form>
+    {{end}}
+    <div class="user">
+      <span class="av" title="{{.User}}">{{initials .User}}</span>
+      <form method="post" action="/deconnexion">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button type="submit" class="btn l">Se déconnecter</button>
+      </form>
+    </div>
+  </header>
+  <div class="body">
 {{block "content" .}}{{end}}
+  </div>
 </main>
-<footer>PatchWarden {{.Version}} · aucune action n'est lancée sans confirmation · icônes <a href="https://selfh.st/icons" target="_blank" rel="noopener noreferrer">selfh.st/icons</a> (CC BY 4.0)</footer>
+</div>
+{{else}}
+<div class="login-wrap">
+{{block "content" .}}{{end}}
+</div>
+{{end}}
+<script src="/static/app.js" defer></script>
 {{block "scripts" .}}{{end}}
 </body>
 </html>

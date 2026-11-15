@@ -1,12 +1,13 @@
 {{define "content"}}
+<div class="content">
 {{with .Plan}}
-<p class="crumbs"><a href="/">Inventaire</a> › <a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{.Guest.Name}}</a></p>
+<p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{.Guest.Name}}</a></p>
 <div class="pagehead">
   <div>
     <h1>{{.Action.Label}} · {{.Guest.Name}} <span class="muted">· LXC {{.Guest.VMID}} sur {{.Guest.Node}}</span></h1>
     {{with .Det}}<p class="muted">D'après la détection {{age .At}} ({{date .At}}). <a href="/taches/{{.JobID}}">journal</a></p>{{end}}
   </div>
-  {{if .Guest.Critical}}<span class="badge badge-big badge-crit">invité critique</span>{{end}}
+  {{if .Guest.Critical}}<span class="b c">invité critique</span>{{end}}
 </div>
 {{end}}
 
@@ -22,13 +23,14 @@
 {{else}}
 <section class="card">
   <h2>Ce qui sera fait</h2>
+  {{with .Det}}{{template "frise" .Apps}}{{end}}
   <ol class="steps">{{range .Steps}}<li>{{.}}</li>{{end}}</ol>
   {{range .Warnings}}<p class="alert alert-warn">{{.}}</p>{{end}}
   {{if .CSRun}}{{range .Answers}}<p class="small">Réponse à « {{.Prompt}} » : <strong>{{answerLabel .Value}}</strong></p>{{end}}{{end}}
   {{if .Packages}}
   <details><summary>Paquets apt ({{len .Packages}})</summary>
     <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th><th></th></tr></thead><tbody>
-    {{range .Packages}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td><td>{{if .Security}}<span class="badge badge-crit">sécurité</span>{{end}}</td></tr>{{end}}
+    {{range .Packages}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td><td>{{if .Security}}<span class="b c">sécurité</span>{{end}}</td></tr>{{end}}
     </tbody></table></div>
   </details>
   {{end}}
@@ -43,7 +45,7 @@
       {{if .Snap.Possible}}<input type="hidden" name="snapshot" value="1">{{end}}
       <h3>1. Simuler</h3>
       <p class="muted small">apt en simulation (<code>apt-get -s</code>) ; l'update community-scripts n'a pas de mode simulation : il est seulement décrit.{{if .Snap.Possible}} Vérifie aussi que le snapshot serait accepté.{{end}} Rien n'est modifié.</p>
-      <button type="submit" class="btn btn-secondary">Simuler</button>
+      <button type="submit" class="btn sec2">Simuler</button>
     </form>
     <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="launch-box apply">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -67,10 +69,11 @@
         <input name="nom" required autocomplete="off" pattern="{{.Guest.Name}}">
       </label>
       {{end}}
-      <button type="submit" class="btn btn-danger">Appliquer</button>
+      <button type="submit" class="btn d">Appliquer</button>
     </form>
   </div>
 </section>
 {{end}}
 {{end}}
+</div>
 {{end}}

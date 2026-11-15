@@ -31,7 +31,7 @@ func endpoint(url, fp string) config.Endpoint {
 
 func TestGuestsWithPinnedFingerprint(t *testing.T) {
 	srv, fp := server(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api2/json/cluster/resources" || r.URL.Query().Get("type") != "vm" {
+		if r.URL.Path != "/api2/json/cluster/resources" || r.URL.RawQuery != "" {
 			t.Errorf("requête inattendue : %s", r.URL)
 		}
 		if got := r.Header.Get("Authorization"); got != "PVEAPIToken=patchwarden@pve!inventaire=s3cret" {

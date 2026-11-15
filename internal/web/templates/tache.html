@@ -1,24 +1,41 @@
 {{define "content"}}
+<div class="content">
 {{with .Job}}
-<p class="crumbs"><a href="/taches">Tâches</a> › {{.ID}}</p>
+<p class="crumbs"><a href="/taches">Tâches</a> › <a href="/invites/{{.Target.Node}}/{{.Target.VMID}}">{{.Target.Name}}</a></p>
 <div class="pagehead">
   <div>
-    <h1>{{.Kind}}{{if .DryRun}} (simulation){{end}} · <a href="/invites/{{.Target.Node}}/{{.Target.VMID}}">{{.Target.Name}}</a></h1>
-    <p class="muted">{{.Target.Node}}/{{.Target.VMID}} · demandée par {{.RequestedBy}} le {{date .CreatedAt}}{{if not .StartedAt.IsZero}} · durée {{.Duration}}{{end}}</p>
+    <h1>{{.Kind}}{{if .DryRun}} (simulation){{end}} · {{.Target.Name}}</h1>
+    <p class="sub">{{.Target.Node}}/{{.Target.VMID}} · demandée par {{.RequestedBy}} le {{date .CreatedAt}}{{if not .StartedAt.IsZero}} · durée {{.Duration}}{{end}}</p>
   </div>
-  <span class="badge badge-big badge-{{statusClass .Status}}" id="statut">{{.Status}}</span>
+  <span class="sp"></span>
+  <span class="b {{statusClass .Status}}" id="statut">{{.Status}}</span>
 </div>
 {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
-{{if .Summary}}<p class="alert alert-info">{{.Summary}}</p>{{end}}
+{{if .Summary}}<p class="alert alert-{{if .Error}}warn{{else}}ok{{end}}">{{.Summary}}</p>{{end}}
 {{end}}
 
-<div class="logbar">
-  <h2>Journal complet</h2>
-  {{if .Live}}<label class="small"><input type="checkbox" id="suivre" checked> suivre la fin</label>{{end}}
-</div>
-<pre class="log" id="journal"{{if .Live}} data-flux="/taches/{{.Job.ID}}/flux"{{end}}>{{range .Lines}}<span{{if .Stderr}} class="err"{{end}}>{{clock .T}}  {{.Text}}
+<div class="task{{if not .Steps}} solo{{end}}">
+  {{if .Steps}}
+  <div class="stp" id="etapes">
+    {{range $i, $s := .Steps}}
+    <div class="s" data-etat="{{.State}}" data-debut="{{.Start}}" data-fin="{{.Done}}"><span class="o">{{inc $i}}</span><div><b>{{.Label}}</b>{{with .Detail}}<div class="t">{{.}}</div>{{end}}</div></div>
+    {{end}}
+    {{with .SnapName}}<p class="sub">En cas de problème : <a href="/invites/{{$.Job.Target.Node}}/{{$.Job.Target.VMID}}/snapshots/{{.}}/restaurer">revenir au snapshot {{.}}</a></p>{{end}}
+  </div>
+  {{end}}
+  <div class="term">
+    <div class="th">
+      {{if .Live}}<span class="live">en direct</span>{{else}}<span>journal complet</span>{{end}}
+      {{with .NodeLog}}<span>·</span><span class="path" title="Journal complet sur le nœud, gardé 30 jours">{{.}}</span>{{end}}
+      <span class="sp"></span>
+      {{if .Live}}<label><input type="checkbox" id="suivre" checked> suivre</label>{{end}}
+    </div>
+<pre class="log" id="journal"{{if .Live}} data-flux="/taches/{{.Job.ID}}/flux"{{end}}>{{range .Lines}}<span class="{{lineClass .}}"><span class="h">{{clock .T}}</span>  {{.Text}}
 </span>{{end}}</pre>
+  </div>
+</div>
 {{if .Live}}<noscript><p class="muted">Le suivi en direct utilise JavaScript : rechargez la page pour voir la suite.</p></noscript>{{end}}
+</div>
 {{end}}
 
 {{define "scripts"}}{{if .Live}}<script src="/static/tache.js" defer></script>{{end}}{{end}}

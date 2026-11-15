@@ -71,7 +71,7 @@ func iconCandidates(g inventory.Guest, det *detect.Result) []string {
 			out = append(out, n)
 		}
 	}
-	if det != nil && det.CS.Script != "" && det.CS.Script != det.OSID {
+	if det != nil && det.CS.Script != "" && det.CS.Script != det.OSID && !det.CS.OSOnly {
 		add(det.CS.Script)
 	}
 	add(g.Name)

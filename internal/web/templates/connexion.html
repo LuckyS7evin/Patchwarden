@@ -1,5 +1,6 @@
 {{define "content"}}
 <section class="login">
+  <div class="brand"><i><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></i>PatchWarden</div>
   <h1>Connexion</h1>
   {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
   <form method="post" action="/connexion">
@@ -7,7 +8,7 @@
     <input id="username" name="username" value="{{.Username}}" autocomplete="username" required autofocus>
     <label for="password">Mot de passe</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit" class="btn btn-primary">Se connecter</button>
+    <button type="submit" class="btn p">Se connecter</button>
   </form>
 </section>
 {{end}}

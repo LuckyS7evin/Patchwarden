@@ -111,3 +111,29 @@ func TestTriggerRefreshCoalesces(t *testing.T) {
 		t.Errorf("demandes non fusionnées : %d", len(s.trigger))
 	}
 }
+
+func TestNodeStats(t *testing.T) {
+	src := &fake{name: "loki", res: []proxmox.Resource{
+		{Type: "node", Node: "loki", Status: "online", CPU: 0.234, Mem: 6 << 30, MaxMem: 10 << 30},
+		{Type: "storage", Node: "loki", Storage: "local", PluginType: "dir", Content: "iso,vztmpl,backup", Status: "available", Disk: 90, MaxDisk: 100},
+		{Type: "storage", Node: "loki", Storage: "local-lvm", PluginType: "lvmthin", Content: "rootdir,images", Status: "available", Disk: 82, MaxDisk: 100},
+		{Type: "storage", Node: "loki", Storage: "nas", PluginType: "nfs", Content: "images", Shared: 1, Status: "available", Disk: 99, MaxDisk: 100},
+		{Type: "lxc", VMID: 104, Node: "loki", Name: "termix", Status: "running"},
+	}}
+	s := New([]Source{src}, config.Policy{}, time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.Refresh(context.Background())
+	snap, _ := s.Current()
+	st := snap.NodeStats["loki"]
+	if !st.Online || st.CPUPct() != 23 || st.MemPct() != 60 || st.Storage != "local-lvm" || st.StoragePct() != 82 || st.StorageType != "lvmthin" {
+		t.Errorf("état du nœud : %+v", st)
+	}
+	if len(snap.Guests) != 1 {
+		t.Errorf("les nœuds et stockages ne sont pas des invités : %+v", snap.Guests)
+	}
+	src.err = errors.New("délai dépassé")
+	s.Refresh(context.Background())
+	snap, _ = s.Current()
+	if st := snap.NodeStats["loki"]; !st.Stale || st.Online || st.StoragePct() != 82 {
+		t.Errorf("nœud injoignable : %+v", st)
+	}
+}

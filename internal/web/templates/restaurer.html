@@ -1,9 +1,10 @@
 {{define "content"}}
+<div class="content">
 {{with .Row}}
-<p class="crumbs"><a href="/">Inventaire</a> › <a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></p>
+<p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></p>
 <div class="pagehead">
   <div>
-    <h1 class="titlewithicon"><img class="appicon appicon-lg" src="{{.Icon}}" alt="" width="40" height="40">Retour arrière · {{.Name}}&nbsp;<span class="muted">· LXC {{.VMID}} sur {{.Node}}</span></h1>
+    <h1 class="tn"><img class="ic lg" src="{{.Icon}}" alt="" width="40" height="40">Retour arrière · {{.Name}}&nbsp;<span class="muted">· LXC {{.VMID}} sur {{.Node}}</span></h1>
   </div>
 </div>
 {{end}}
@@ -44,8 +45,9 @@
     <label>Saisissez le nom de l'invité (<code>{{.Row.Name}}</code>)
       <input name="nom" required autocomplete="off">
     </label>
-    <button type="submit" class="btn btn-danger">Revenir à ce snapshot</button>
+    <button type="submit" class="btn d">Revenir à ce snapshot</button>
   </form>
 </section>
 {{end}}
+</div>
 {{end}}

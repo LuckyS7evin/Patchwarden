@@ -53,12 +53,42 @@ func (g Guest) TypeLabel() string {
 	return "VM"
 }
 
+// NodeStat est l'état d'un nœud : charge, mémoire et stockage local des
+// invités le plus rempli.
+type NodeStat struct {
+	Name     string
+	Online   bool
+	Stale    bool // nœud injoignable : valeurs de la lecture précédente
+	CPU      float64
+	MemUsed  int64
+	MemTotal int64
+	// Storage : stockage non partagé accueillant des disques d'invités
+	// (rootdir ou images), le plus rempli.
+	Storage                   string
+	StorageType               string
+	StorageUsed, StorageTotal int64
+}
+
+func pct(a, b int64) int {
+	if b <= 0 {
+		return 0
+	}
+	return int(a * 100 / b)
+}
+
+// CPUPct, MemPct et StoragePct renvoient des pourcentages entiers.
+func (n NodeStat) CPUPct() int     { return int(n.CPU*100 + 0.5) }
+func (n NodeStat) MemPct() int     { return pct(n.MemUsed, n.MemTotal) }
+func (n NodeStat) StoragePct() int { return pct(n.StorageUsed, n.StorageTotal) }
+
 // Snapshot est l'état de l'inventaire à un instant donné.
 type Snapshot struct {
 	Guests    []Guest
 	FetchedAt time.Time
 	// Errors : erreur par point d'accès lors du dernier rafraîchissement.
 	Errors map[string]string
+	// NodeStats : état de chaque nœud, par nom.
+	NodeStats map[string]NodeStat
 }
 
 // Nodes renvoie les nœuds présents, triés.
@@ -66,6 +96,9 @@ func (s Snapshot) Nodes() []string {
 	set := map[string]bool{}
 	for _, g := range s.Guests {
 		set[g.Node] = true
+	}
+	for n := range s.NodeStats {
+		set[n] = true
 	}
 	out := make([]string, 0, len(set))
 	for n := range set {
@@ -157,7 +190,7 @@ func (s *Service) Refresh(ctx context.Context) {
 	}
 	wg.Wait()
 
-	next := Snapshot{FetchedAt: time.Now(), Errors: map[string]string{}}
+	next := Snapshot{FetchedAt: time.Now(), Errors: map[string]string{}, NodeStats: map[string]NodeStat{}}
 	byKey := map[string]Guest{}
 	covered := map[string]bool{} // nœuds présents dans au moins une réponse
 	for _, r := range results {
@@ -167,7 +200,28 @@ func (s *Service) Refresh(ctx context.Context) {
 			continue
 		}
 		for _, res := range r.res {
-			if res.Type != "lxc" && res.Type != "qemu" {
+			switch res.Type {
+			case "node":
+				st := next.NodeStats[res.Node]
+				st.Name, st.Online = res.Node, res.Status == "online"
+				st.CPU, st.MemUsed, st.MemTotal = res.CPU, res.Mem, res.MaxMem
+				next.NodeStats[res.Node] = st
+				covered[res.Node] = true
+				continue
+			case "storage":
+				if res.Shared != 0 || res.MaxDisk <= 0 || res.Status != "available" ||
+					(!strings.Contains(res.Content, "rootdir") && !strings.Contains(res.Content, "images")) {
+					continue
+				}
+				st := next.NodeStats[res.Node]
+				st.Name = res.Node
+				if st.Storage == "" || pct(res.Disk, res.MaxDisk) > st.StoragePct() {
+					st.Storage, st.StorageType, st.StorageUsed, st.StorageTotal = res.Storage, res.PluginType, res.Disk, res.MaxDisk
+				}
+				next.NodeStats[res.Node] = st
+				continue
+			case "lxc", "qemu":
+			default:
 				continue
 			}
 			g := s.classify(res)
@@ -183,6 +237,12 @@ func (s *Service) Refresh(ctx context.Context) {
 		if !covered[g.Node] {
 			g.Stale = true
 			byKey[g.Key()] = g
+		}
+	}
+	for n, st := range prev.NodeStats {
+		if _, ok := next.NodeStats[n]; !ok && !covered[n] {
+			st.Stale, st.Online = true, false
+			next.NodeStats[n] = st
 		}
 	}
 	for _, g := range byKey {

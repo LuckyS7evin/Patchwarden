@@ -1,0 +1,62 @@
+{{define "content"}}
+<div class="content">
+<form method="post" action="/lot/simuler">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <div class="pagehead">
+    <div>
+      <h1>À traiter</h1>
+      <p class="sub">Ce qui attend une action, du plus urgent au moins urgent{{with .Shell.NextDetection}} · prochaine détection {{.}}{{end}}</p>
+    </div>
+  </div>
+  {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+
+  {{if not .Loaded}}<div class="empty">Première lecture de l'inventaire en cours…</div>
+  {{else if not .Detected}}<div class="empty">Aucune détection pour l'instant. Lancez « Détecter tout » (lecture seule) pour savoir ce qui attend.</div>
+  {{else}}
+  <div class="sum">
+    <div><b{{if .Todo.Sec}} class="c"{{end}}>{{.Todo.Sec}}</b>correctifs de sécurité</div>
+    <div><b>{{.Todo.SecGuests}}</b>invités concernés</div>
+    <div><b>{{.Todo.Versions}}</b>nouvelles versions</div>
+    <div><b>{{.Todo.Reboots}}</b>redémarrages</div>
+    <div><b>{{.Todo.OK}}</b>invités à jour</div>
+  </div>
+  {{if not .Todo.Groups}}<div class="empty">Rien à traiter : tous les invités détectés sont à jour.</div>{{end}}
+  {{range .Todo.Groups}}
+  <section class="grp" aria-labelledby="g-{{.Key}}">
+    <div class="gh"><span class="t" id="g-{{.Key}}">{{.Title}}</span><span class="k">{{len .Items}}</span>{{with .Why}}<span class="why">{{.}}</span>{{end}}</div>
+    {{range .Items}}
+    <div class="it">
+      {{if .Sel}}<input type="checkbox" name="sel" value="{{.Sel}}" aria-label="Sélectionner {{.Guest.Name}}">{{else}}<span></span>{{end}}
+      <img class="ic" src="{{.Icon}}" alt="" width="28" height="28" loading="lazy">
+      <div class="nm"><a href="{{.Link}}">{{.Guest.Name}}</a><span>{{.Guest.TypeLabel}} {{.Guest.VMID}} · {{.Guest.Node}}</span></div>
+      <div class="what">{{if .Pkgs}}{{range .Pkgs}}<span class="m">{{.}}</span> {{end}}{{if gt .More 0}}+{{.More}}{{end}}
+        {{- else if .App}}{{.App.Name}} <span class="m">{{if .App.Installed}}{{.App.Installed}}{{else}}?{{end}}</span> → <span class="m">{{.App.Latest}}</span>{{if .App.ChangelogURL}} · <a href="{{.App.ChangelogURL}}" target="_blank" rel="noopener noreferrer">changelog</a>{{end}}
+        {{- else}}{{.Text}}{{with .Code}} <span class="m">{{.}}</span>{{end}}{{end}}</div>
+      <span class="b {{.TagClass}}">{{.Tag}}</span>
+      <span class="age">{{since .Since}}</span>
+      <a class="chev" href="{{.Link}}" aria-label="Ouvrir {{.Guest.Name}}">›</a>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+  {{end}}
+
+  {{if .Selection}}
+  <div class="batch" id="lot">
+    <b id="lot-nombre">Sélection</b>
+    <span class="muted">simulation seulement, rien n'est modifié</span>
+    <button type="submit" class="btn p">Simuler la sélection</button>
+    <button type="button" class="btn" id="lot-aucun" aria-label="Tout désélectionner">✕</button>
+  </div>
+  {{end}}
+</form>
+</div>
+<aside class="rcol">
+  <h2>Activité</h2>
+  {{range .Activity}}
+  <div class="ev"><i class="{{evClass .Status}}"></i><div><a href="/taches/{{.ID}}"><b>{{.Kind}}</b>{{if .DryRun}} (simulation){{end}} · {{.Target.Name}}</a>
+    <div class="t">{{when .CreatedAt}} · {{.Status}}{{if .Error}} · {{.Error}}{{else if .Summary}} · {{.Summary}}{{end}}</div></div></div>
+  {{else}}<p class="muted">Aucune tâche pour l'instant.</p>{{end}}
+  <p><a href="/taches">Toutes les tâches →</a></p>
+</aside>
+{{end}}

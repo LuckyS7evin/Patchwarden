@@ -1,0 +1,30 @@
+{{define "content"}}
+<div class="content">
+  <div class="pagehead">
+    <div>
+      <h1>Snapshots</h1>
+      <p class="sub">Snapshots pris par PatchWarden avant une mise à jour · {{.Defaults.Keep}} gardé(s) par invité · refus au-delà de {{.Defaults.MaxPct}} % de remplissage{{if .Manual}} · {{.Manual}} snapshot(s) manuel(s), jamais touchés{{end}}</p>
+    </div>
+  </div>
+  {{with .Storages}}<p>{{range .}}<span class="b">{{.}}</span>{{end}}</p>{{end}}
+  {{if .Rows}}
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Invité</th><th>Snapshot</th><th>Pris</th><th>Description</th><th></th></tr></thead>
+    <tbody>
+    {{range .Rows}}
+    <tr>
+      <td><div class="tn"><img class="ic" src="{{.Row.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}?onglet=snapshots">{{.Row.Name}}</a><span class="id">{{.Row.TypeLabel}} {{.Row.VMID}} · {{.Row.Node}}</span></div></td>
+      <td class="nowrap"><code>{{.Snap.Name}}</code></td>
+      <td class="nowrap">{{if not .Snap.Time.IsZero}}{{age .Snap.Time}}{{end}}</td>
+      <td class="small">{{.Snap.Description}}</td>
+      <td class="nowrap"><a class="btn s" href="/invites/{{.Row.Node}}/{{.Row.VMID}}/snapshots/{{.Snap.Name}}/restaurer">Revenir…</a>
+        <a class="btn s" href="/invites/{{.Row.Node}}/{{.Row.VMID}}?onglet=snapshots">Gérer</a></td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}<div class="empty">Aucun snapshot PatchWarden. Cochez « Prendre un snapshot avant la mise à jour » sur la page de confirmation pour en créer un.</div>{{end}}
+</div>
+{{end}}

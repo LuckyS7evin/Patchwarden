@@ -1,114 +1,66 @@
 {{define "content"}}
-<div class="pagehead">
-  <div>
-    <h1>Inventaire</h1>
-    <p class="muted">
-      {{if .Loaded}}Lu {{.Age}} ({{.FetchedAt}}){{else}}Première lecture en cours…{{end}}
-      {{if .Refreshing}} · <strong>rafraîchissement en cours</strong>{{end}}
-      {{if .NextDetection}}<br>Prochaine détection automatique : {{.NextDetection}}{{end}}
-    </p>
-  </div>
-  <div class="actions">
-    {{if .Detectable}}
-    <form method="post" action="/inventaire/detecter">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button type="submit" class="btn btn-primary" title="Lecture seule : apt-get update et simulation dans chaque LXC démarré">Détecter les mises à jour ({{.Detectable}} LXC)</button>
-    </form>
-    {{end}}
+<div class="content">
+  <div class="pagehead">
+    <div>
+      <h1>Inventaire</h1>
+      <p class="sub">{{.K.Total}} invités sur {{len .Nodes}} nœud(s) · {{if .Loaded}}lu {{.Age}} ({{.FetchedAt}}){{else}}première lecture en cours…{{end}}{{if .Refreshing}} · <strong>rafraîchissement en cours</strong>{{end}}</p>
+    </div>
+    <span class="sp"></span>
     <form method="post" action="/inventaire/rafraichir?{{.Query}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button type="submit" class="btn">Rafraîchir l'inventaire</button>
     </form>
   </div>
-</div>
 
-{{range .Errors}}<p class="alert alert-error" role="alert">Point d'accès en erreur : {{.}}</p>{{end}}
+  {{range .Errors}}<p class="alert alert-error" role="alert">Point d'accès en erreur : {{.}}</p>{{end}}
 
-<ul class="stats">
-  <li><span>{{.Counts.Total}}</span> invités</li>
-  <li><span>{{.Counts.LXC}}</span> LXC</li>
-  <li><span>{{.Counts.VM}}</span> VM</li>
-  <li><span>{{.Counts.Running}}</span> démarrés</li>
-  <li><span>{{.Counts.CommunityScript}}</span> community-scripts</li>
-  <li><span>{{.Counts.Critical}}</span> à confirmation renforcée</li>
-</ul>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Invités démarrés</div><div class="v">{{.K.Running}}<small>/ {{.K.Total}}</small></div></div>
+    <div class="kpi{{if .K.Sec}} c{{end}}"><div class="l">Correctifs de sécurité</div><div class="v">{{.K.Sec}}<small>sur {{.K.SecGuests}} invité(s)</small></div></div>
+    <div class="kpi"><div class="l">Applis à mettre à jour</div><div class="v">{{.K.Apps}}<small>{{if .K.Majors}}dont {{.K.Majors}} majeure(s){{end}}</small></div></div>
+    <div class="kpi"><div class="l">Snapshots PatchWarden</div><div class="v">{{.K.Snapshots}}<small>{{with .K.Storage}}{{.}} : {{$.K.StoragePct}} %{{end}}</small></div></div>
+  </div>
 
-<form class="filters" method="get" action="/">
-  <label>Nœud
-    <select name="noeud">
-      <option value="">tous</option>
-      {{range .Nodes}}<option value="{{.}}" {{if eq . $.Filter.Node}}selected{{end}}>{{.}}</option>{{end}}
-    </select>
-  </label>
-  <label>Type
-    <select name="type">
-      <option value="">tous</option>
-      <option value="lxc" {{if eq .Filter.Type "lxc"}}selected{{end}}>LXC</option>
-      <option value="qemu" {{if eq .Filter.Type "qemu"}}selected{{end}}>VM</option>
-    </select>
-  </label>
-  <label>Tag
-    <select name="tag">
-      <option value="">tous</option>
-      {{range .Tags}}<option value="{{.}}" {{if eq . $.Filter.Tag}}selected{{end}}>{{.}}</option>{{end}}
-    </select>
-  </label>
-  <label>Recherche
-    <input name="q" value="{{.Filter.Q}}" placeholder="nom ou ID">
-  </label>
-  <button type="submit" class="btn">Filtrer</button>
-  {{if .Filter.Active}}<a class="btn btn-link" href="/">Effacer ({{.Shown}} sur {{.Counts.Total}})</a>{{end}}
-</form>
+  <div class="tools">
+    {{range .Views}}<a class="chip" href="{{.URL}}"{{if .Current}} aria-current="true"{{end}}>{{.Label}} <b>{{.Count}}</b></a>{{end}}
+    <span class="sp"></span>
+    <form method="get" action="/inventaire">
+      {{with .Filter.View}}<input type="hidden" name="vue" value="{{.}}">{{end}}
+      {{with .Filter.Q}}<input type="hidden" name="q" value="{{.}}">{{end}}
+      <select name="noeud" aria-label="Nœud"><option value="">tous les nœuds</option>{{range .Nodes}}<option value="{{.}}"{{if eq . $.Filter.Node}} selected{{end}}>{{.}}</option>{{end}}</select>
+      <select name="type" aria-label="Type"><option value="">LXC et VM</option><option value="lxc"{{if eq .Filter.Type "lxc"}} selected{{end}}>LXC</option><option value="qemu"{{if eq .Filter.Type "qemu"}} selected{{end}}>VM</option></select>
+      {{if .Tags}}<select name="tag" aria-label="Tag"><option value="">tous les tags</option>{{range .Tags}}<option value="{{.}}"{{if eq . $.Filter.Tag}} selected{{end}}>{{.}}</option>{{end}}</select>{{end}}
+      <button type="submit" class="btn s">Filtrer</button>
+      {{if .Filter.Active}}<a class="btn l s" href="/inventaire">Effacer ({{.Shown}} sur {{.K.Total}})</a>{{end}}
+    </form>
+  </div>
 
-{{if and .Loaded (not .Groups)}}<p class="muted">Aucun invité ne correspond.</p>{{end}}
-
-{{range .Groups}}
-<section class="node">
-  <h2>{{.Node}} <span class="muted">· {{len .Rows}}</span></h2>
+  {{if and .Loaded (not .Groups)}}<div class="empty">Aucun invité ne correspond.</div>{{end}}
+  {{if .Groups}}
   <div class="tablewrap">
   <table class="inv">
-    <colgroup><col class="c-id"><col class="c-name"><col class="c-type"><col class="c-state"><col class="c-upd"><col class="c-tags"><col class="c-flags"><col class="c-act"></colgroup>
-    <thead><tr><th>ID</th><th>Nom</th><th>Type</th><th>État</th><th>Mises à jour</th><th class="col-tags">Tags</th><th>Particularités</th><th></th></tr></thead>
+    <thead><tr><th>Invité</th><th>État</th><th>Mises à jour</th><th>Détection</th><th><span class="muted small">cliquer une ligne : aperçu</span></th></tr></thead>
+    {{range .Groups}}
     <tbody>
-    {{range .Rows}}
-      <tr{{if .Stale}} class="stale"{{end}}>
-        <td class="num">{{.VMID}}</td>
-        <td><span class="namecell"><img class="appicon" src="{{.Icon}}" alt="" width="22" height="22" loading="lazy"><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a></span></td>
-        <td>{{.TypeLabel}}</td>
-        <td><span class="status status-{{.Status}}"{{if eq (statusLabel .Status) "inconnu"}} title="Le nœud ne publie pas l'état de ses invités au cluster (vérifiez le service pvestatd sur {{.Node}})"{{end}}>{{statusLabel .Status}}</span></td>
-        <td class="updates">
-          {{if .Active}}<a class="badge badge-run" href="/taches/{{.Active.ID}}">{{.Active.Kind}} {{.Active.Status}}…</a>
-          {{else if .Det}}
-            {{with .Det}}
-              {{if .Apt.Present}}{{if .Apt.Total}}<span class="badge {{if .Apt.Security}}badge-crit{{else}}badge-warn{{end}}">{{.Apt.Total}} apt{{if .Apt.Security}} · {{.Apt.Security}} sécu{{end}}</span>{{else}}<span class="badge badge-ok">apt à jour</span>{{end}}{{end}}
-              {{range .Apps}}{{if .UpdateAvailable}}<a class="badge badge-warn" href="{{.ChangelogURL}}" target="_blank" rel="noopener noreferrer" title="{{.Installed}} → {{.Latest}} : voir le changelog">{{.Name}} → {{.Latest}}</a>{{end}}{{end}}
-              {{if .RebootRequired}}<span class="badge badge-warn">redémarrage requis</span>{{end}}
-              <span class="muted small">{{age .At}}</span>
-            {{end}}
-          {{else}}<span class="muted small">non détecté</span>{{end}}
-        </td>
-        <td class="col-tags">{{range .ShownTags}}<span class="tag">{{.}}</span>{{end}}</td>
-        <td>
-          {{if .CommunityScript}}<span class="badge badge-cs">community-scripts</span>{{end}}
-          {{if .Critical}}<span class="badge badge-crit" title="Motif : {{.CriticalReason}}">confirmation renforcée</span>{{end}}
-          {{if .Template}}<span class="badge">modèle</span>{{end}}
-          {{with .Det}}{{with .Snap.PW}}<span class="badge" title="{{range .}}{{.Name}} {{end}}">{{len .}} snapshot PW</span>{{end}}{{end}}
-          {{if .Lock}}<span class="badge badge-warn">verrou : {{.Lock}}</span>{{end}}
-          {{if .Stale}}<span class="badge badge-warn">nœud injoignable, données anciennes</span>{{end}}
-        </td>
-        <td class="rowaction">
-          {{if .CanDetect}}
-          <form method="post" action="/invites/{{.Node}}/{{.VMID}}/detecter">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <button type="submit" class="btn btn-small" title="Lecture seule">Détecter</button>
-          </form>
-          {{end}}
-        </td>
+      <tr class="grp"><td colspan="5">{{.Node}} · {{len .Rows}} invité(s)</td></tr>
+      {{range .Rows}}
+      <tr data-apercu="/invites/{{.Node}}/{{.VMID}}/apercu" data-fiche="/invites/{{.Node}}/{{.VMID}}"{{if .Stale}} class="stale"{{end}}>
+        <td><div class="tn"><img class="ic" src="{{.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a><span class="id">{{.TypeLabel}} {{.VMID}}</span>
+          {{- if .Critical}}<span class="b c" title="Motif : {{.CriticalReason}}">critique</span>{{end}}
+          {{- if .Template}}<span class="b">modèle</span>{{end}}
+          {{- if .Lock}}<span class="b w">verrou : {{.Lock}}</span>{{end}}
+          {{- if .Stale}}<span class="b w">nœud injoignable</span>{{end}}</div></td>
+        <td>{{template "statut" .}}</td>
+        <td class="upd">{{template "maj" .}}</td>
+        <td class="muted">{{with .Det}}{{age .At}}{{else}}—{{end}}</td>
+        <td class="rowact">{{if .CanDetect}}<form method="post" action="/invites/{{.Node}}/{{.VMID}}/detecter"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit" class="btn s" title="Lecture seule">Détecter</button></form>{{end}}</td>
       </tr>
-    {{end}}
+      {{end}}
     </tbody>
+    {{end}}
   </table>
   </div>
-</section>
-{{end}}
+  {{end}}
+</div>
+<aside class="drawer" id="tiroir" hidden aria-label="Aperçu de l'invité"></aside>
 {{end}}

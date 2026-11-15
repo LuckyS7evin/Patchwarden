@@ -2,8 +2,11 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
 
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
@@ -101,4 +104,40 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request, se *sess
 	}
 	s.log.Info("suppression de snapshot demandée", "invité", g.Key(), "snapshot", name, "tâche", j.ID, "par", se.user)
 	http.Redirect(w, r, "/taches/"+j.ID, http.StatusSeeOther)
+}
+
+type snapRow struct {
+	Row  row
+	Snap detect.Snapshot
+}
+
+type snapshotsData struct {
+	base
+	Rows     []snapRow
+	Manual   int // snapshots manuels (jamais touchés)
+	Defaults engine.SnapConfig
+	Storages []string
+}
+
+// snapshotsPage liste tous les snapshots PatchWarden, du plus ancien au plus récent.
+func (s *Server) snapshotsPage(w http.ResponseWriter, r *http.Request, se *session) {
+	snap, _ := s.inv.Current()
+	d := snapshotsData{base: s.base("Snapshots", "snapshots", se), Defaults: s.deps.Engine.SnapDefaults()}
+	for _, g := range snap.Guests {
+		rw := s.rowFor(g)
+		if rw.Det == nil {
+			continue
+		}
+		d.Manual += rw.Det.Snap.Other
+		for _, sn := range rw.Det.Snap.PW {
+			d.Rows = append(d.Rows, snapRow{Row: rw, Snap: sn})
+		}
+	}
+	sort.SliceStable(d.Rows, func(i, j int) bool { return d.Rows[i].Snap.Time.Before(d.Rows[j].Snap.Time) })
+	for _, n := range snap.Nodes() {
+		if st, ok := snap.NodeStats[n]; ok && st.Storage != "" {
+			d.Storages = append(d.Storages, fmt.Sprintf("%s : %s (%s) %d %%", strings.ToUpper(n), st.Storage, st.StorageType, st.StoragePct()))
+		}
+	}
+	s.render(w, "snapshots", http.StatusOK, d)
 }

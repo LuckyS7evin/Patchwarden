@@ -53,12 +53,24 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
   nouveaux correctifs de sécurité, un pour les nouvelles versions d'applis, un pour les
   échecs ; fin de chaque mise à jour réelle (réussite ou échec). `patchwarden notify-test`
   vérifie les cibles ;
-- **vue Sécurité** : correctifs de sécurité en attente par invité, les plus anciens d'abord,
-  et LXC sans détection récente ;
-- **interface** : thème clair, sombre ou automatique (bouton « Thème » en haut à droite,
-  mémorisé par le navigateur) ; icône de chaque appli ou OS ([selfh.st/icons](https://selfh.st/icons),
-  CC BY 4.0, mises en cache par PatchWarden, réglage `[ui]`) ; une migration par étapes
-  (le script demande de relancer `update`) est signalée dans le résumé de la tâche.
+- **interface** :
+  - **À traiter** (accueil) : ce qui attend une action, du plus urgent au moins urgent
+    (correctifs de sécurité les plus anciens d'abord, versions majeures, applis, autres
+    paquets, entretien : redémarrages, snapshots à supprimer, détections absentes ou
+    anciennes), avec sélection multiple et **simulation par lot** ; activité récente ;
+  - **Inventaire** : chiffres clés, filtres rapides, tableau par nœud ; un clic sur une ligne
+    ouvre l'**aperçu** de l'invité dans un tiroir ;
+  - **fiche de l'invité** : versions installée → disponible en frise, onglets Aperçu,
+    Paquets, Snapshots, Questions du script, Historique ;
+  - **tâche en direct** : étapes (snapshot, apt, appli, vérification) qui avancent avec le
+    journal, terminal à côté, lien de retour au snapshot ;
+  - **Snapshots** (tous les snapshots PatchWarden), **Réglages** (configuration en lecture
+    seule, sans secret) ;
+  - menu latéral avec l'état des nœuds (CPU, RAM, stockage des invités le plus rempli) ;
+  - thème clair, sombre ou automatique (sélecteur en haut, mémorisé par le navigateur) ;
+    icône de chaque appli ou OS ([selfh.st/icons](https://selfh.st/icons), CC BY 4.0, mises
+    en cache par PatchWarden, réglage `[ui]`) ; utilisable sans JavaScript (le tiroir, la
+    sélection et le suivi en direct en ont besoin).
 
 - **snapshots avant mise à jour** (LXC) :
   - case « Prendre un snapshot avant la mise à jour » sur la page de confirmation ; décochée
@@ -294,7 +306,7 @@ le wrapper est trop ancien.
 
 | Accès | Utilisé pour | Droits | Depuis |
 | :--- | :--- | :--- | :--- |
-| Jeton API `patchwarden@pve!inventaire` | Inventaire | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
+| Jeton API `patchwarden@pve!inventaire` | Inventaire, état des nœuds et des stockages (`/cluster/resources`) | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
 | Clé SSH vers root des nœuds, **commande forcée** | Verbes du wrapper | Une seule commande possible (le wrapper), depuis la seule IP de PatchWarden, `restrict` : ni terminal, ni redirection de ports, ni agent | Jalon 2 |
 | Jeton GitHub (facultatif) | Dernières versions des applis | Aucun droit : lecture des dépôts publics | Jalon 2 |
 

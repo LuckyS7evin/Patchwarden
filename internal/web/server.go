@@ -125,22 +125,61 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 			case jobs.Success:
 				return "ok"
 			case jobs.Failed:
-				return "crit"
+				return "c"
 			case jobs.Interrupted:
-				return "warn"
+				return "w"
 			default:
-				return "run"
+				return "a"
 			}
 		},
+		"evClass": func(st jobs.Status) string {
+			switch st {
+			case jobs.Success:
+				return ""
+			case jobs.Failed:
+				return "f"
+			case jobs.Interrupted:
+				return "w"
+			default:
+				return "r"
+			}
+		},
+		"when": func(t time.Time) string {
+			lt, now := t.Local(), s.now().Local()
+			if lt.Year() == now.Year() && lt.YearDay() == now.YearDay() {
+				return lt.Format("15:04")
+			}
+			return lt.Format("02/01 15:04")
+		},
+		"inc":       func(i int) int { return i + 1 },
+		"sub":       func(a, b int) int { return a - b },
+		"lineClass": lineClass,
+	}
+	funcs["upper"] = strings.ToUpper
+	funcs["level"] = level
+	funcs["bar"] = barSVG
+	funcs["initials"] = initials
+	funcs["plural"] = plural
+	funcs["pct"] = func(f float64) string { return fmt.Sprintf("%.0f", f) }
+	funcs["since"] = func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return sinceLabel(s.now().Sub(t))
 	}
 	s.pages = map[string]*template.Template{}
-	for _, p := range []string{"connexion", "inventaire", "invite", "taches", "tache", "action", "securite", "restaurer"} {
-		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+p+".html")
+	for _, p := range []string{"connexion", "traiter", "inventaire", "invite", "taches", "tache", "action", "restaurer", "snapshots", "reglages"} {
+		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partiels.html", "templates/"+p+".html")
 		if err != nil {
 			return nil, fmt.Errorf("gabarit %s : %w", p, err)
 		}
 		s.pages[p] = t
 	}
+	frag, err := template.New("apercu.html").Funcs(funcs).ParseFS(assets, "templates/partiels.html", "templates/apercu.html")
+	if err != nil {
+		return nil, fmt.Errorf("gabarit apercu : %w", err)
+	}
+	s.pages["apercu"] = frag
 	return s, nil
 }
 
@@ -154,7 +193,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /connexion", s.loginForm)
 	mux.HandleFunc("POST /connexion", s.sameOrigin(s.loginSubmit))
 	mux.HandleFunc("POST /deconnexion", s.sameOrigin(s.authed(s.csrf(s.logout))))
-	mux.HandleFunc("GET /{$}", s.authed(s.inventoryPage))
+	mux.HandleFunc("GET /{$}", s.authed(s.todoPage))
+	mux.HandleFunc("GET /inventaire", s.authed(s.inventoryPage))
+	mux.HandleFunc("POST /lot/simuler", s.sameOrigin(s.authed(s.csrf(s.batchSimulate))))
+	mux.HandleFunc("GET /snapshots", s.authed(s.snapshotsPage))
+	mux.HandleFunc("GET /reglages", s.authed(s.settingsPage))
+	mux.HandleFunc("GET /invites/{node}/{vmid}/apercu", s.authed(s.previewFragment))
 	mux.HandleFunc("POST /inventaire/rafraichir", s.sameOrigin(s.authed(s.csrf(s.refresh))))
 	mux.HandleFunc("POST /inventaire/detecter", s.sameOrigin(s.authed(s.csrf(s.detectAll))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}", s.authed(s.guestPage))
@@ -166,7 +210,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.authed(s.rollbackPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.sameOrigin(s.authed(s.csrf(s.rollbackSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/supprimer", s.sameOrigin(s.authed(s.csrf(s.deleteSnapshot))))
-	mux.HandleFunc("GET /securite", s.authed(s.securityPage))
+	mux.HandleFunc("GET /securite", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusMovedPermanently) })
 	mux.HandleFunc("GET /taches", s.authed(s.jobsPage))
 	mux.HandleFunc("GET /taches/{id}", s.authed(s.jobPage))
 	mux.HandleFunc("GET /taches/{id}/flux", s.authed(s.jobStream))
@@ -255,14 +299,32 @@ func clientIP(r *http.Request) string {
 // base contient ce que le gabarit commun affiche sur chaque page.
 type base struct {
 	Title, User, CSRF, Version, Nav string
+	Search                          string
+	Shell                           shell
 }
 
 func (s *Server) base(title, nav string, se *session) base {
 	b := base{Title: title, Version: s.version, Nav: nav}
 	if se != nil {
 		b.User, b.CSRF = se.user, se.csrf
+		b.Shell = s.shellFor()
 	}
 	return b
+}
+
+func (s *Server) allDetections() map[string]detect.Result {
+	if s.deps.Detections == nil {
+		return map[string]detect.Result{}
+	}
+	return s.deps.Detections.All()
+}
+
+// isSelf : invité qui héberge PatchWarden (aucune mise à jour lancée d'ici).
+func (s *Server) isSelf(g inventory.Guest) bool {
+	if e, ok := s.deps.Engine.(interface{ IsSelf(inventory.Guest) bool }); ok {
+		return e.IsSelf(g)
+	}
+	return false
 }
 
 type loginData struct {
@@ -317,7 +379,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request, _ *session) {
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request, _ *session) {
 	s.inv.TriggerRefresh()
-	http.Redirect(w, r, "/?"+r.URL.RawQuery, http.StatusSeeOther)
+	http.Redirect(w, r, "/inventaire?"+r.URL.RawQuery, http.StatusSeeOther)
 }
 
 type nodeGroup struct {
@@ -325,8 +387,8 @@ type nodeGroup struct {
 	Rows []row
 }
 
-// row est une ligne de l'inventaire : l'invité, sa dernière détection, sa
-// tâche en cours et les actions possibles.
+// row est un invité tel qu'affiché : sa dernière détection, sa tâche en cours
+// et ce qui est possible.
 type row struct {
 	inventory.Guest
 	Icon      string
@@ -335,10 +397,29 @@ type row struct {
 	Active    *jobs.Job
 	CanDetect bool
 	Why       string
+	Self      bool
+}
+
+// Pending : la dernière détection signale quelque chose à faire.
+func (r row) Pending() bool {
+	return r.Det != nil && (r.Det.Apt.Total > 0 || r.Det.AppUpdates() > 0 || r.Det.RebootRequired)
+}
+
+// Major : une version majeure est disponible.
+func (r row) Major() bool {
+	if r.Det == nil {
+		return false
+	}
+	for _, a := range r.Det.Apps {
+		if a.UpdateAvailable() && a.MajorChange() {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) rowFor(g inventory.Guest) row {
-	r := row{Guest: g}
+	r := row{Guest: g, Self: s.isSelf(g)}
 	t := jobs.Target{Node: g.Node, VMID: g.VMID}
 	if s.deps.Detections != nil {
 		if d, ok := s.deps.Detections.Get(t.Key()); ok {
@@ -366,11 +447,37 @@ func (s *Server) rowFor(g inventory.Guest) row {
 	return r
 }
 
-type counts struct{ Total, LXC, VM, Running, CommunityScript, Critical int }
+// view : filtre rapide de l'inventaire (puces).
+type view struct {
+	Key, Label string
+	Count      int
+	Current    bool
+	URL        string
+}
 
-type filter struct{ Node, Type, Tag, Q string }
+var views = []struct{ key, label string }{
+	{"", "Tous"}, {"maj", "À mettre à jour"}, {"securite", "Sécurité"}, {"majeures", "Versions majeures"}, {"arretes", "Arrêtés"},
+}
 
-func (f filter) Active() bool { return f.Node != "" || f.Type != "" || f.Tag != "" || f.Q != "" }
+func viewMatch(key string, r row) bool {
+	switch key {
+	case "maj":
+		return r.Pending()
+	case "securite":
+		return r.Det != nil && r.Det.Apt.Security > 0
+	case "majeures":
+		return r.Major()
+	case "arretes":
+		return r.Status != "running"
+	}
+	return true
+}
+
+type filter struct{ Node, Type, Tag, Q, View string }
+
+func (f filter) Active() bool {
+	return f.Node != "" || f.Type != "" || f.Tag != "" || f.Q != "" || f.View != ""
+}
 
 func (f filter) match(g inventory.Guest) bool {
 	if f.Node != "" && g.Node != f.Node {
@@ -398,14 +505,35 @@ func (f filter) match(g inventory.Guest) bool {
 	return true
 }
 
+func (f filter) query(view string) string {
+	v := url.Values{}
+	for k, x := range map[string]string{"noeud": f.Node, "type": f.Type, "tag": f.Tag, "q": f.Q, "vue": view} {
+		if x != "" {
+			v.Set(k, x)
+		}
+	}
+	if len(v) == 0 {
+		return "/inventaire"
+	}
+	return "/inventaire?" + v.Encode()
+}
+
+type kpis struct {
+	Running, Total int
+	Sec, SecGuests int
+	Apps, Majors   int
+	Snapshots      int
+	Storage        string
+	StoragePct     int
+}
+
 type inventoryData struct {
 	base
 	Loaded, Refreshing bool
-	Detectable         int
-	NextDetection      string
 	Age, FetchedAt     string
 	Errors             []string
-	Counts             counts
+	K                  kpis
+	Views              []view
 	Shown              int
 	Groups             []nodeGroup
 	Nodes, Tags        []string
@@ -416,20 +544,16 @@ type inventoryData struct {
 func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *session) {
 	snap, refreshing := s.inv.Current()
 	q := r.URL.Query()
-	f := filter{Node: q.Get("noeud"), Type: q.Get("type"), Tag: q.Get("tag"), Q: strings.TrimSpace(q.Get("q"))}
+	f := filter{Node: q.Get("noeud"), Type: q.Get("type"), Tag: q.Get("tag"), Q: strings.TrimSpace(q.Get("q")), View: q.Get("vue")}
 	d := inventoryData{
 		base:   s.base("Inventaire", "inventaire", se),
 		Loaded: !snap.FetchedAt.IsZero(), Refreshing: refreshing,
 		Nodes: snap.Nodes(), Filter: f, Query: r.URL.RawQuery,
 	}
-	if s.deps.NextDetection != nil {
-		if t := s.deps.NextDetection(); !t.IsZero() {
-			d.NextDetection = t.Local().Format("02/01 à 15:04")
-		}
-	}
+	d.Search = f.Q
 	if d.Loaded {
 		d.Age = humanAge(s.now().Sub(snap.FetchedAt))
-		d.FetchedAt = snap.FetchedAt.Format("02/01/2006 15:04:05")
+		d.FetchedAt = snap.FetchedAt.Local().Format("02/01/2006 15:04:05")
 	}
 	for name, e := range snap.Errors {
 		d.Errors = append(d.Errors, name+" : "+e)
@@ -438,30 +562,40 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 
 	tags := map[string]bool{}
 	groups := map[string]*nodeGroup{}
+	counts := make([]int, len(views))
 	for _, g := range snap.Guests {
 		for _, t := range g.Tags {
 			tags[t] = true
 		}
-		d.Counts.Total++
-		if g.Type == "lxc" {
-			d.Counts.LXC++
-		} else {
-			d.Counts.VM++
-		}
-		if g.Status == "running" {
-			d.Counts.Running++
-		}
-		if g.CommunityScript {
-			d.Counts.CommunityScript++
-		}
-		if g.Critical {
-			d.Counts.Critical++
-		}
 		rw := s.rowFor(g)
-		if rw.CanDetect {
-			d.Detectable++
+		d.K.Total++
+		if g.Status == "running" {
+			d.K.Running++
+		}
+		if rw.Det != nil {
+			if rw.Det.Apt.Security > 0 {
+				d.K.Sec += rw.Det.Apt.Security
+				d.K.SecGuests++
+			}
+			for _, a := range rw.Det.Apps {
+				if a.UpdateAvailable() {
+					d.K.Apps++
+					if a.MajorChange() {
+						d.K.Majors++
+					}
+				}
+			}
+			d.K.Snapshots += len(rw.Det.Snap.PW)
 		}
 		if !f.match(g) {
+			continue
+		}
+		for i, v := range views {
+			if viewMatch(v.key, rw) {
+				counts[i]++
+			}
+		}
+		if !viewMatch(f.View, rw) {
 			continue
 		}
 		d.Shown++
@@ -471,6 +605,16 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 			groups[g.Node] = ng
 		}
 		ng.Rows = append(ng.Rows, rw)
+	}
+	for i, v := range views {
+		d.Views = append(d.Views, view{Key: v.key, Label: v.label, Count: counts[i], Current: v.key == f.View, URL: f.query(v.key)})
+	}
+	best := -1
+	for _, st := range snap.NodeStats {
+		if st.Storage != "" && st.StoragePct() > best {
+			best = st.StoragePct()
+			d.K.Storage, d.K.StoragePct = st.Storage+" ("+st.Name+")", best
+		}
 	}
 	for _, n := range d.Nodes {
 		if ng, ok := groups[n]; ok {
@@ -482,6 +626,18 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 	}
 	sort.Strings(d.Tags)
 	s.render(w, "inventaire", http.StatusOK, d)
+}
+
+// sinceLabel : « depuis 3 j », pour l'ancienneté d'une mise à jour en attente.
+func sinceLabel(d time.Duration) string {
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("depuis %d min", max(1, int(d.Minutes())))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("depuis %d h", int(d.Hours()))
+	default:
+		return fmt.Sprintf("depuis %d j", int(d.Hours()/24))
+	}
 }
 
 func humanAge(d time.Duration) string {

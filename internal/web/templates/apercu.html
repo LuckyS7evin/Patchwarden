@@ -1,0 +1,44 @@
+{{define "apercu"}}
+{{with .Row}}
+<div class="dh">
+  <img class="ic md" src="{{.Icon}}" alt="" width="44" height="44">
+  <div><h2>{{if .Name}}{{.Name}}{{else}}(nom indisponible){{end}}</h2><div class="muted">{{.TypeLabel}} {{.VMID}} · {{.Node}}{{with .Det}} · {{.OSPretty}}{{end}}</div></div>
+  <button type="button" class="x" data-fermer aria-label="Fermer l'aperçu">×</button>
+</div>
+{{end}}
+<div class="db">
+  {{if .Row.Active}}<p class="alert alert-info"><a href="/taches/{{.Row.Active.ID}}">Tâche en cours : {{.Row.Active.Kind}} ({{.Row.Active.Status}})</a></p>{{end}}
+  {{with .Row.Det}}
+  <div class="card flat"><h4>Mises à jour</h4>
+    <div class="row"><span>Sécurité</span><span>{{if .Apt.Security}}<span class="b c">{{plural .Apt.Security "correctif" "correctifs"}}</span>{{else}}aucun correctif{{end}}</span></div>
+    <div class="row"><span>Autres paquets</span><span>{{sub .Apt.Total .Apt.Security}}</span></div>
+    <div class="row"><span>Redémarrage</span><span>{{if .RebootRequired}}<span class="b w">requis</span>{{else}}non requis{{end}}</span></div>
+    <div class="row"><span>Détection</span><span>{{age .At}}</span></div>
+  </div>
+  {{if .Apps}}<div class="card flat"><h4>Applications</h4>{{template "frise" .Apps}}</div>
+  {{else if .CS.OSOnly}}<div class="card flat"><h4>Application</h4><p class="muted small">Le script ct/{{.CS.Script}}.sh ne met à jour que l'OS (apt).</p></div>{{end}}
+  {{if $.TopSec}}<div class="card flat"><h4>Correctifs de sécurité</h4>
+    {{range $.TopSec}}<div class="pk"><span>{{.Name}}</span><span class="muted">{{.Old}} → {{.New}}</span></div>{{end}}
+    {{if gt (len $.SecurityPkgs) (len $.TopSec)}}<p class="muted small">+ {{sub (len $.SecurityPkgs) (len $.TopSec)}} autres</p>{{end}}
+  </div>{{end}}
+  {{if .Snap.PW}}<div class="card flat"><h4>Snapshot PatchWarden</h4>
+    {{range .Snap.PW}}<div class="row"><span class="mono">{{.Name}}</span><span class="muted">{{if not .Time.IsZero}}{{age .Time}}{{end}}</span></div>{{end}}
+    <a href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}?onglet=snapshots">Revenir à cet état ou supprimer →</a>
+  </div>{{end}}
+  <div class="card flat"><h4>Système</h4>
+    <div class="row"><span>Ressources</span><span>{{.Nproc}} CPU · {{.MemMB}} Mo</span></div>
+    <div class="row"><span>Disque /</span><span>{{.RootUsedPct}} %</span></div>
+    {{range .Snap.Storages}}<div class="row"><span>Stockage</span><span>{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{pct .UsedPct}} %{{end}}</span></div>{{end}}
+  </div>
+  {{else}}
+  <p class="muted">{{if .Row.Why}}{{.Row.Why}}{{else}}Aucune détection pour cet invité.{{end}}</p>
+  {{end}}
+  {{with .Row.ShownTags}}<p>{{range .}}<span class="b">{{.}}</span>{{end}}</p>{{end}}
+  <p><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}">Ouvrir la fiche complète →</a></p>
+</div>
+<div class="df">
+  {{if .Row.CanDetect}}<form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/detecter"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit" class="btn">Détecter</button></form>{{end}}
+  {{with .Sec}}{{if .OK}}<a class="btn" href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/action/securite">Sécurité uniquement…</a>{{end}}{{end}}
+  {{with .Full}}{{if .OK}}<a class="btn p" href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/action/complet">Tout mettre à jour…</a>{{end}}{{end}}
+</div>
+{{end}}

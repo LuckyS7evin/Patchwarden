@@ -1,0 +1,27 @@
+{{/* Frise des versions : installée (point gris) → disponible (point coloré). */}}
+{{define "frise"}}{{if .}}<div class="tracks">{{range .}}
+  <span class="a">{{.Name}}</span>
+  <span class="tv"><i></i>{{if .Installed}}{{.Installed}}{{else}}?{{end}}</span>
+  {{if .UpdateAvailable}}<span class="ln{{if not .MajorChange}} mi{{end}}"><span>{{if .MajorChange}}majeure{{else}}mineure{{end}}</span></span><span class="tv n{{if not .MajorChange}} mi{{end}}"><i></i>{{.Latest}}</span>
+  {{else if eq .Status "à jour"}}<span class="ln ok"><span>à jour</span></span><span class="tv n ok"><i></i>{{.Latest}}</span>
+  {{else}}<span class="ln ok"><span>inconnue</span></span><span class="tv" title="{{.LatestError}}"><i></i>{{if .Latest}}{{.Latest}}{{else}}?{{end}}</span>{{end}}
+  {{if .ChangelogURL}}<a href="{{.ChangelogURL}}" target="_blank" rel="noopener noreferrer">changelog ↗</a>{{else}}<span></span>{{end}}
+{{end}}</div>{{end}}{{end}}
+
+{{/* État d'un invité. */}}
+{{define "statut"}}<span class="st{{if eq .Status "running"}}{{else if eq (statusLabel .Status) "inconnu"}} unk{{else}} off{{end}}"{{if eq (statusLabel .Status) "inconnu"}} title="Le nœud ne publie pas l'état de ses invités au cluster (vérifiez pvestatd sur {{.Node}})"{{end}}><i></i>{{statusLabel .Status}}</span>{{end}}
+
+{{/* Résumé des mises à jour d'une ligne (row). */}}
+{{define "maj"}}{{if .Active}}<a class="b a" href="/taches/{{.Active.ID}}">{{.Active.Kind}} · {{.Active.Status}}…</a>
+{{else if .Det}}{{if .Self}}<span class="b" title="Mises à jour à lancer à la main sur cet invité">héberge PatchWarden</span>{{end}}{{with .Det}}
+  {{- if .Apt.Security}}<span class="b c">{{.Apt.Security}} sécu</span>{{end}}
+  {{- if .Apt.Total}}<span class="b w">{{.Apt.Total}} apt</span>{{end}}
+  {{- range .Apps}}{{if .UpdateAvailable}}<span class="b {{if .MajorChange}}v{{else}}w{{end}}" title="{{.Installed}} → {{.Latest}}">{{.Name}} → {{.Latest}}</span>{{end}}{{end}}
+  {{- if .RebootRequired}}<span class="b w">redémarrage</span>{{end}}
+  {{- if and (not .Apt.Total) (not .AppUpdates) (not .RebootRequired)}}<span class="b ok">à jour</span>{{end}}
+  {{- if .Snap.PW}}<span class="b v" title="Snapshot PatchWarden à supprimer une fois la mise à jour validée">◉ snapshot</span>{{end}}{{end}}
+{{else if eq .Status "running"}}{{if eq .Type "lxc"}}<span class="muted">non détecté</span>{{else}}<span class="muted">VM : prochain jalon</span>{{end}}
+{{else}}<span class="muted">ignoré ({{statusLabel .Status}})</span>{{end}}{{end}}
+
+{{define "ico-box"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/></svg>{{end}}
+{{define "ico-shield"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>{{end}}

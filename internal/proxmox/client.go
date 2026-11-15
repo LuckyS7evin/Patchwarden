@@ -22,10 +22,11 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/config"
 )
 
-// Resource est une entrée de /cluster/resources?type=vm (LXC ou VM).
+// Resource est une entrée de /cluster/resources : invité (LXC ou VM), nœud
+// ou stockage.
 type Resource struct {
 	ID       string  `json:"id"`
-	Type     string  `json:"type"` // "lxc" ou "qemu"
+	Type     string  `json:"type"` // "lxc", "qemu", "node", "storage"…
 	VMID     int     `json:"vmid"`
 	Node     string  `json:"node"`
 	Name     string  `json:"name"`
@@ -36,6 +37,16 @@ type Resource struct {
 	MaxCPU   float64 `json:"maxcpu"`
 	MaxMem   int64   `json:"maxmem"`
 	Uptime   int64   `json:"uptime"`
+	// Nœud et stockage : charge (cpu, de 0 à 1), mémoire, espace utilisé.
+	CPU     float64 `json:"cpu"`
+	Mem     int64   `json:"mem"`
+	Disk    int64   `json:"disk"`
+	MaxDisk int64   `json:"maxdisk"`
+	// Stockage : nom, type (lvmthin, zfspool…), contenus, partagé.
+	Storage    string `json:"storage"`
+	PluginType string `json:"plugintype"`
+	Content    string `json:"content"`
+	Shared     int    `json:"shared"`
 }
 
 // Client interroge un point d'accès.
@@ -96,8 +107,10 @@ func New(ep config.Endpoint, timeout time.Duration) (*Client, error) {
 // Name renvoie le nom du point d'accès.
 func (c *Client) Name() string { return c.name }
 
-// Guests renvoie tous les LXC et VM visibles depuis ce point d'accès : tout le
-// cluster si le nœud en fait partie, sinon ce seul nœud.
+// Guests renvoie toutes les ressources visibles depuis ce point d'accès (tout
+// le cluster si le nœud en fait partie, sinon ce seul nœud) : les LXC et VM,
+// mais aussi les nœuds et les stockages (charge et remplissage, en lecture
+// seule, avec les mêmes droits PVEAuditor).
 //
 // Quand un nœud ne publie plus l'état de ses invités au cluster (pvestatd
 // arrêté ou bloqué), /cluster/resources les renvoie avec l'état « unknown » et
@@ -105,7 +118,7 @@ func (c *Client) Name() string { return c.name }
 // (/nodes/<nœud>/lxc et /qemu), qui reste généralement disponible.
 func (c *Client) Guests(ctx context.Context) ([]Resource, error) {
 	var out []Resource
-	if err := c.get(ctx, "/cluster/resources?type=vm", &out); err != nil {
+	if err := c.get(ctx, "/cluster/resources", &out); err != nil {
 		return nil, err
 	}
 	incomplete := map[string]bool{}

@@ -1,172 +1,111 @@
 {{define "content"}}
+<div class="content">
 {{with .Row}}
-<p class="crumbs"><a href="/">Inventaire</a> › {{.Node}}</p>
-<div class="pagehead">
-  <div>
-    <h1 class="titlewithicon"><img class="appicon appicon-lg" src="{{.Icon}}" alt="" width="40" height="40">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}&nbsp;<span class="muted">· {{.TypeLabel}} {{.VMID}}</span></h1>
-    <p>
-      <span class="status status-{{.Status}}"{{if eq (statusLabel .Status) "inconnu"}} title="Le nœud ne publie pas l'état de ses invités au cluster (vérifiez le service pvestatd sur {{.Node}})"{{end}}>{{statusLabel .Status}}</span>
-      {{if .CommunityScript}}<span class="badge badge-cs">community-scripts</span>{{end}}
-      {{if .Critical}}<span class="badge badge-crit">confirmation renforcée ({{.CriticalReason}})</span>{{end}}
-      {{range .Tags}}<span class="tag">{{.}}</span>{{end}}
-    </p>
+<p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/inventaire?noeud={{.Node}}">{{.Node}}</a> › {{.Name}}</p>
+<section class="ph">
+  <img class="ic lg" src="{{.Icon}}" alt="" width="60" height="60">
+  <div class="phm">
+    <h1>{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</h1>
+    <div class="sub">{{.TypeLabel}} {{.VMID}} · {{.Node}}{{with .Det}} · {{.OSPretty}} · {{.Nproc}} CPU · {{.MemMB}} Mo{{end}} · {{template "statut" .}}
+      {{- if .CommunityScript}} <span class="b a">community-scripts</span>{{end}}
+      {{- if .Critical}} <span class="b c" title="{{.CriticalReason}}">confirmation renforcée</span>{{end}}
+      {{- range .ShownTags}} <span class="b">{{.}}</span>{{end}}</div>
+    {{with .Det}}
+    {{template "frise" .Apps}}
+    <div class="stats">
+      <span>{{template "ico-box"}}<b>{{.Apt.Total}}</b> paquet(s) apt</span>
+      <span>{{template "ico-shield"}}<b>{{.Apt.Security}}</b> correctif(s) de sécurité</span>
+      <span>détection {{age .At}} · <a href="/taches/{{.JobID}}">journal</a></span>
+      {{if .RebootRequired}}<span class="b w">redémarrage requis</span>{{end}}
+    </div>
+    {{end}}
   </div>
-  <div class="actions">
-    {{if .Active}}<a class="btn" href="/taches/{{.Active.ID}}">Tâche en cours : {{.Active.Kind}}</a>
-    {{else if .CanDetect}}
+  <div class="acts">
+    {{if .Active}}<a class="btn sec2" href="/taches/{{.Active.ID}}">Tâche en cours : {{.Active.Kind}}</a>{{end}}
+    {{with $.Full}}{{if .OK}}<a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/complet">Tout mettre à jour…</a>{{else}}<span class="btn" aria-disabled="true" title="{{index .Blockers 0}}">Tout mettre à jour</span>{{end}}{{end}}
+    {{with $.Sec}}{{if .OK}}<a class="btn" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/securite">Sécurité uniquement…</a>{{else}}<span class="btn" aria-disabled="true" title="{{index .Blockers 0}}">Sécurité uniquement</span>{{end}}{{end}}
+    {{if .CanDetect}}
     <form method="post" action="/invites/{{.Node}}/{{.VMID}}/detecter">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <button type="submit" class="btn btn-primary" title="Lecture seule">Détecter les mises à jour</button>
+      <button type="submit" class="btn" title="Lecture seule">Détecter</button>
     </form>
-    {{else if .Why}}<span class="muted small">Détection indisponible : {{.Why}}</span>{{end}}
+    {{else if and .Why (not .Active)}}<span class="small muted">{{.Why}}</span>{{end}}
   </div>
-</div>
+</section>
 {{end}}
 
 {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
-{{if .Notice}}<p class="alert alert-info">{{.Notice}}</p>{{end}}
+{{if .Notice}}<p class="alert alert-ok">{{.Notice}}</p>{{end}}
 
-{{if .Plans}}
-<section class="card">
-  <h2>Mettre à jour</h2>
-  <div class="actions-grid">
-  {{range .Plans}}
-    <div class="action-box">
-      {{if .OK}}<a class="btn btn-primary" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}">{{.Action.Label}}…</a>
-      {{else}}<span class="btn btn-disabled" aria-disabled="true">{{.Action.Label}}</span>{{end}}
-      <ul class="small">
-        {{if .OK}}{{range .Steps}}<li>{{.}}</li>{{end}}{{else}}{{range .Blockers}}<li class="muted">{{.}}</li>{{end}}{{end}}
-      </ul>
-    </div>
+<nav class="tabs" aria-label="Sections">
+  {{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}{{if .Badge}}<span class="b {{.BadgeClass}}">{{.Badge}}</span>{{end}}</a>{{end}}
+</nav>
+
+{{if eq .Tab ""}}
+<div class="cols">
+  <div>
+  {{with .Full}}
+  <section class="card">
+    <h2>Ce que ferait « Tout mettre à jour »</h2>
+    {{if .OK}}
+      {{if and .Snap.Checked .Snap.Possible}}<div class="step"><span class="n">0</span><div>Snapshot <code>{{.Snap.Name}}</code> <span class="b v">pré-coché : {{.Snap.Reason}}</span></div></div>{{end}}
+      {{range $i, $s := .Steps}}<div class="step"><span class="n">{{inc $i}}</span><div>{{$s}}</div></div>{{end}}
+      {{range .Warnings}}<p class="alert alert-warn">{{.}}</p>{{end}}
+      {{if .Snap.Possible}}
+      <div class="snapnote{{if not .Snap.Checked}} off{{end}}"><span>{{if .Snap.Checked}}◉{{else}}○{{end}}</span><span><b>Snapshot avant la mise à jour : {{if .Snap.Checked}}pré-coché{{else}}décoché{{end}}</b><br><span class="sub">{{.Snap.Reason}} · {{.Snap.Storage}} · modifiable sur la page de confirmation</span></span></div>
+      {{else}}
+      <div class="snapnote off"><span>○</span><span><b>Snapshot impossible</b><br><span class="sub">{{.Snap.Why}}</span></span></div>
+      {{end}}
+      <p><a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/complet">Continuer vers la confirmation…</a></p>
+    {{else}}
+      <ul>{{range .Blockers}}<li class="muted">{{.}}</li>{{end}}</ul>
+    {{end}}
+  </section>
   {{end}}
+  {{with .Sec}}{{if .OK}}
+  <section class="card">
+    <h2>« Sécurité uniquement »</h2>
+    {{range $i, $s := .Steps}}<div class="step"><span class="n">{{inc $i}}</span><div>{{$s}}</div></div>{{end}}
+    {{range .Warnings}}<p class="alert alert-warn">{{.}}</p>{{end}}
+    <p><a class="btn" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/securite">Continuer vers la confirmation…</a></p>
+  </section>
+  {{end}}{{end}}
+  {{if not .Full}}<section class="card"><h2>Mises à jour</h2><p class="muted">{{if .Row.Why}}Indisponibles : {{.Row.Why}}{{else}}Indisponibles pour cet invité.{{end}}</p></section>{{end}}
+  {{if gt .Missing 0}}<p class="alert alert-warn">Le script pose des questions sans terminal : <a href="?onglet=questions">enregistrez une réponse pour chacune</a> avant de mettre à jour l'application.</p>{{end}}
   </div>
-  <p class="muted small">Un clic ouvre une page de confirmation avec le détail et un bouton « Simuler ». Rien n'est lancé sans confirmation.</p>
-</section>
-{{end}}
-
-{{if and (eq .Row.Type "lxc") .Row.Det}}
-<section class="card">
-  <h2>Snapshots</h2>
-  {{with .Row.Det.Snap}}
-  {{if not .Known}}<p class="muted">Informations absentes : relancez une détection (wrapper v5 requis sur le nœud).</p>
-  {{else}}
-  <p>
-    {{if .Possible}}<span class="badge badge-ok">snapshots possibles</span>{{else}}<span class="badge badge-crit">le stockage ne permet pas les snapshots</span>{{end}}
-    {{range .Storages}}<span class="badge">{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{printf "%.0f" .UsedPct}} %{{end}}</span>{{end}}
-    {{if .Binds}}<span class="muted small">· {{.Binds}} point(s) de montage lié(s) à l'hôte, hors snapshot</span>{{end}}
-    {{if .Other}}<span class="muted small">· {{.Other}} snapshot(s) manuel(s), jamais touchés par PatchWarden</span>{{end}}
-  </p>
-  {{if .PW}}
-  <div class="tablewrap"><table>
-    <thead><tr><th>Snapshot PatchWarden</th><th>Date</th><th>Description</th><th></th></tr></thead>
-    <tbody>
-    {{range .PW}}
-    <tr>
-      <td class="nowrap"><code>{{.Name}}</code></td>
-      <td>{{if not .Time.IsZero}}{{date .Time}}{{end}}</td>
-      <td class="small">{{.Description}}</td>
-      <td class="snapactions">
-        {{if not $.SnapWhy}}<div class="snapactions-in">
-        <a class="btn btn-small" href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/snapshots/{{.Name}}/restaurer">Revenir à cet état…</a>
-        <form method="post" action="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/snapshots/{{.Name}}/supprimer" class="inline-form">
-          <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <label class="small"><input type="checkbox" name="confirme" value="1" required> confirmer</label>
-          <button type="submit" class="btn btn-small">Supprimer</button>
-        </form>
-        </div>{{end}}
-      </td>
-    </tr>
+  <div>
+    <section class="card">
+      <h2>Historique</h2>
+      {{if .Jobs}}<div class="tl">
+        {{range $i, $j := .Jobs}}{{if lt $i 5}}<div class="tev {{evClass .Status}}"><a href="/taches/{{.ID}}">{{.Kind}}{{if .DryRun}} (simulation){{end}}</a>{{if .Error}} · <span class="crit">{{.Error}}</span>{{else if .Summary}} · {{.Summary}}{{end}}<div class="t">{{when .CreatedAt}} · {{.RequestedBy}} · {{.Status}}</div></div>{{end}}{{end}}
+      </div>
+      {{if gt (len .Jobs) 5}}<a href="?onglet=historique">Tout l'historique →</a>{{end}}
+      {{else}}<p class="muted">Aucune tâche.</p>{{end}}
+    </section>
+    {{with .Row.Det}}
+    <section class="card">
+      <h2>Système</h2>
+      <dl class="kv">
+        <dt>OS</dt><dd>{{.OSPretty}}</dd>
+        <dt>Ressources</dt><dd>{{.Nproc}} CPU · {{.MemMB}} Mo</dd>
+        <dt>Disque /</dt><dd>{{.RootUsedPct}} %{{if ge .RootUsedPct 75}} <span class="b w" title="Le moteur community-scripts refuse de mettre à jour au-delà de 80 %">limite : 80 %</span>{{end}}</dd>
+        <dt>Redémarrage</dt><dd>{{if .RebootRequired}}<span class="b w">requis</span>{{else}}non requis{{end}}</dd>
+        {{if .CS.Present}}
+        <dt>Script</dt><dd>{{if .CS.ScriptURL}}<a href="{{.CS.ScriptURL}}" target="_blank" rel="noopener noreferrer">ct/{{.CS.Script}}.sh</a>{{else}}ct/{{.CS.Script}}.sh{{end}}{{if .CS.PageURL}} · <a href="{{.CS.PageURL}}" target="_blank" rel="noopener noreferrer">page</a>{{end}} · {{if eq .CS.Entry "helper"}}format actuel{{else if eq .CS.Entry "legacy"}}ancien format{{else}}{{.CS.Entry}}{{end}}</dd>
+        {{if .CS.Error}}<dt>Problème</dt><dd class="crit">{{.CS.Error}}</dd>{{end}}
+        {{if .CS.NeedCPU}}<dt>Exigé par le script</dt><dd>{{.CS.NeedCPU}} CPU · {{.CS.NeedRAMMB}} Mo{{if or (lt .Nproc .CS.NeedCPU) (lt .MemMB .CS.NeedRAMMB)}} <span class="b w">augmentation temporaire</span>{{end}}</dd>{{end}}
+        {{if .CS.OSOnly}}<dt>Portée</dt><dd>OS seulement (apt)</dd>{{end}}
+        {{end}}
+        {{if .Docker}}<dt>Docker</dt><dd>{{.Containers}} conteneur(s) — suivi détaillé dans un prochain jalon</dd>{{end}}
+        {{range .Snap.Storages}}<dt>Stockage</dt><dd>{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{pct .UsedPct}} %{{end}}</dd>{{end}}
+      </dl>
+    </section>
     {{end}}
-    </tbody>
-  </table></div>
-  {{if $.SnapWhy}}<p class="muted small">Retour arrière et suppression indisponibles : {{$.SnapWhy}}</p>{{end}}
-  {{else}}<p class="muted">Aucun snapshot PatchWarden.</p>{{end}}
-  {{end}}
-  {{end}}
-  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/snapshots/reglage" class="inline-form spaced">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <label>Case « snapshot avant mise à jour » pour cet invité :
-      <select name="reglage">
-        <option value="" {{if eq .SnapPref ""}}selected{{end}}>automatique</option>
-        <option value="toujours" {{if eq .SnapPref "toujours"}}selected{{end}}>toujours cochée</option>
-        <option value="jamais" {{if eq .SnapPref "jamais"}}selected{{end}}>jamais cochée d'office</option>
-      </select>
-    </label>
-    <button type="submit" class="btn btn-small">Enregistrer</button>
-  </form>
-  <p class="muted small">Automatique : cochée {{if .SnapDefaults.Default}}pour tous les invités (réglage global){{else}}pour les invités critiques et les changements de version majeure{{end}}. PatchWarden garde {{.SnapDefaults.Keep}} snapshot(s) par invité et refuse le snapshot, donc la mise à jour, si le stockage est rempli à {{.SnapDefaults.MaxPct}} % ou plus.</p>
-</section>
-{{end}}
-
-{{if .Answers}}
-<section class="card">
-  <h2>Questions posées par le script</h2>
-  <p class="small">Sans terminal, une question sans réponse fait échouer la mise à jour de l'application en plein milieu. Choisissez la réponse que PatchWarden donnera à chaque fois :</p>
-  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/reponses">
-    <input type="hidden" name="csrf" value="{{.CSRF}}">
-    {{range $i, $a := .Answers}}
-    <fieldset class="answer">
-      <legend>« {{$a.Prompt}} »</legend>
-      <label><input type="radio" name="r{{$i}}" value="y" required {{if and $a.Set (eq $a.Value "y")}}checked{{end}}> oui</label>
-      <label><input type="radio" name="r{{$i}}" value="n" {{if and $a.Set (eq $a.Value "n")}}checked{{end}}> non</label>
-      <label><input type="radio" name="r{{$i}}" value="defaut" {{if and $a.Set (eq $a.Value "")}}checked{{end}}> réponse par défaut (Entrée)</label>
-      {{if not $a.Set}}<span class="badge badge-crit">à renseigner</span>{{end}}
-    </fieldset>
-    {{end}}
-    <button type="submit" class="btn">Enregistrer les réponses</button>
-  </form>
-</section>
-{{end}}
-
-{{with .Row.Det}}
-<section class="card">
-  <h2>Dernière détection <span class="muted">· {{age .At}} ({{date .At}}) · <a href="/taches/{{.JobID}}">journal</a></span></h2>
-  <dl class="facts">
-    <dt>Système</dt><dd>{{.OSPretty}}</dd>
-    <dt>Ressources</dt><dd>{{.Nproc}} CPU · {{.MemMB}} Mo</dd>
-    <dt>Disque /</dt><dd>{{.RootUsedPct}} % utilisé{{if ge .RootUsedPct 75}} <span class="badge badge-warn">le moteur community-scripts refuse de mettre à jour au-delà de 80 %</span>{{end}}</dd>
-    <dt>Redémarrage</dt><dd>{{if .RebootRequired}}<span class="badge badge-warn">requis</span>{{else}}non requis{{end}}</dd>
-    {{if .Docker}}<dt>Docker</dt><dd>{{.Containers}} conteneur(s) — suivi détaillé dans un prochain jalon</dd>{{end}}
-  </dl>
-</section>
-
-{{if .CS.Present}}
-<section class="card">
-  <h2>Application community-scripts</h2>
-  <dl class="facts">
-    <dt>Script</dt><dd>
-      {{if .CS.ScriptURL}}<a href="{{.CS.ScriptURL}}" target="_blank" rel="noopener noreferrer">ct/{{.CS.Script}}.sh</a>{{else}}ct/{{.CS.Script}}.sh{{end}}
-      {{if .CS.PageURL}} · <a href="{{.CS.PageURL}}" target="_blank" rel="noopener noreferrer">page du script</a>{{end}}
-      · entrée <code>update</code> : {{if eq .CS.Entry "helper"}}format actuel{{else if eq .CS.Entry "legacy"}}ancien format (migré au prochain update){{else}}{{.CS.Entry}}{{end}}
-    </dd>
-    {{if .CS.Error}}<dt>Problème</dt><dd class="crit">{{.CS.Error}}</dd>{{end}}
-    {{if .CS.NeedCPU}}<dt>Exigé par le script</dt><dd>{{.CS.NeedCPU}} CPU · {{.CS.NeedRAMMB}} Mo
-      {{if or (lt .Nproc .CS.NeedCPU) (lt .MemMB .CS.NeedRAMMB)}} <span class="badge badge-warn">supérieur au CT : augmentation temporaire nécessaire pour la mise à jour</span>{{end}}</dd>{{end}}
-    {{if .CS.OSOnly}}<dt>Portée</dt><dd>le script ne met à jour que l'OS (apt), pas l'application</dd>{{end}}
-    {{if .CS.Prompts}}<dt>Questions sans terminal</dt><dd>{{range .CS.Prompts}}<span class="badge badge-warn">« {{.}} »</span> {{end}}<br><span class="muted small">Réponses à enregistrer plus haut, avant toute mise à jour de l'application.</span></dd>{{end}}
-  </dl>
-  {{if .Apps}}
-  <div class="tablewrap">
-  <table>
-    <thead><tr><th>Application</th><th>Installée</th><th>Dernière</th><th>État</th><th>Changelog</th></tr></thead>
-    <tbody>
-    {{range .Apps}}
-    <tr>
-      <td>{{.Name}} <span class="muted small">{{.Repo}}</span></td>
-      <td><code>{{if .Installed}}{{.Installed}}{{else}}?{{end}}</code></td>
-      <td><code>{{if .Latest}}{{.Latest}}{{else}}?{{end}}</code>{{if .LatestError}}<br><span class="muted small">{{.LatestError}}</span>{{end}}</td>
-      <td>{{if .MajorChange}}<span class="badge badge-crit" title="Le premier numéro de version change : lisez le changelog">version majeure</span> {{end}}{{if .UpdateAvailable}}<span class="badge badge-warn">mise à jour disponible</span>{{else if eq .Status "à jour"}}<span class="badge badge-ok">à jour</span>{{else}}<span class="badge">inconnue</span>{{end}}</td>
-      <td>{{if .ChangelogURL}}<a href="{{.ChangelogURL}}" target="_blank" rel="noopener noreferrer">ouvrir</a>{{end}}</td>
-    </tr>
-    {{end}}
-    </tbody>
-  </table>
   </div>
-  {{end}}
-</section>
-{{end}}
+</div>
 
-{{if .Apt.Present}}
+{{else if eq .Tab "paquets"}}
+{{with .Row.Det}}{{if .Apt.Present}}
 <section class="card">
   <h2>Paquets apt</h2>
   <p>
@@ -179,25 +118,98 @@
   {{if not .Apt.SecurityRepo}}<p class="alert alert-warn">Aucun dépôt de sécurité configuré dans cet invité : « Sécurité uniquement » n'aura aucun effet.</p>{{end}}
   {{range .Apt.RefreshErrors}}<p class="alert alert-error">apt-get update : {{.}}</p>{{end}}
   {{if $.SecurityPkgs}}
-  <details open><summary>Sécurité ({{len $.SecurityPkgs}})</summary>
-    <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th></tr></thead><tbody>
-    {{range $.SecurityPkgs}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td></tr>{{end}}
-    </tbody></table></div>
-  </details>
+  <h3>Sécurité ({{len $.SecurityPkgs}})</h3>
+  <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th><th>En attente</th></tr></thead><tbody>
+  {{range $.SecurityPkgs}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td><td class="muted">{{since .Since}}</td></tr>{{end}}
+  </tbody></table></div>
   {{end}}
   {{if $.OtherPkgs}}
-  <details><summary>Autres ({{len $.OtherPkgs}})</summary>
-    <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th></tr></thead><tbody>
-    {{range $.OtherPkgs}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td></tr>{{end}}
-    </tbody></table></div>
-  </details>
+  <h3 class="spaced">Autres ({{len $.OtherPkgs}})</h3>
+  <div class="tablewrap"><table><thead><tr><th>Paquet</th><th>Installé</th><th>Nouveau</th><th>En attente</th></tr></thead><tbody>
+  {{range $.OtherPkgs}}<tr><td>{{.Name}}</td><td><code>{{.Old}}</code></td><td><code>{{.New}}</code></td><td class="muted">{{since .Since}}</td></tr>{{end}}
+  </tbody></table></div>
   {{end}}
 </section>
-{{end}}
-{{else}}
-<p class="muted">Aucune détection pour cet invité.</p>
-{{end}}
+{{else}}<p class="muted">apt absent de cet invité.</p>{{end}}
+{{else}}<p class="muted">Aucune détection pour cet invité.</p>{{end}}
 
+{{else if eq .Tab "snapshots"}}
+<section class="card">
+  <h2>Snapshots</h2>
+  {{if and (eq .Row.Type "lxc") .Row.Det}}
+  {{with .Row.Det.Snap}}
+  {{if not .Known}}<p class="muted">Informations absentes : relancez une détection (wrapper v5 ou plus récent requis sur le nœud).</p>
+  {{else}}
+  <p>
+    {{if .Possible}}<span class="b ok">snapshots possibles</span>{{else}}<span class="b c">le stockage ne permet pas les snapshots</span>{{end}}
+    {{range .Storages}}<span class="b">{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{pct .UsedPct}} %{{end}}</span>{{end}}
+    {{if .Binds}}<span class="muted small">· {{.Binds}} point(s) de montage lié(s) à l'hôte, hors snapshot</span>{{end}}
+    {{if .Other}}<span class="muted small">· {{.Other}} snapshot(s) manuel(s), jamais touchés par PatchWarden</span>{{end}}
+  </p>
+  {{if .PW}}
+  <div class="tablewrap"><table>
+    <thead><tr><th>Snapshot PatchWarden</th><th>Date</th><th>Description</th><th></th></tr></thead>
+    <tbody>
+    {{range .PW}}
+    <tr>
+      <td class="nowrap"><code>{{.Name}}</code></td>
+      <td class="nowrap">{{if not .Time.IsZero}}{{date .Time}}{{end}}</td>
+      <td class="small">{{.Description}}</td>
+      <td>{{if not $.SnapWhy}}<div class="snapacts">
+        <a class="btn s" href="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/snapshots/{{.Name}}/restaurer">Revenir à cet état…</a>
+        <form method="post" action="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/snapshots/{{.Name}}/supprimer" class="inline-form">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <label class="small"><input type="checkbox" name="confirme" value="1" required> confirmer</label>
+          <button type="submit" class="btn s">Supprimer</button>
+        </form>
+      </div>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table></div>
+  {{if $.SnapWhy}}<p class="muted small">Retour arrière et suppression indisponibles : {{$.SnapWhy}}</p>{{end}}
+  {{else}}<p class="muted">Aucun snapshot PatchWarden.</p>{{end}}
+  {{end}}
+  {{end}}
+  {{else}}<p class="muted">Aucune information de snapshot pour cet invité.</p>{{end}}
+  {{if eq .Row.Type "lxc"}}
+  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/snapshots/reglage" class="inline-form spaced">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>Case « snapshot avant mise à jour » pour cet invité :
+      <select name="reglage">
+        <option value="" {{if eq .SnapPref ""}}selected{{end}}>automatique</option>
+        <option value="toujours" {{if eq .SnapPref "toujours"}}selected{{end}}>toujours cochée</option>
+        <option value="jamais" {{if eq .SnapPref "jamais"}}selected{{end}}>jamais cochée d'office</option>
+      </select>
+    </label>
+    <button type="submit" class="btn s">Enregistrer</button>
+  </form>
+  <p class="muted small">Automatique : cochée {{if .SnapDefaults.Default}}pour tous les invités (réglage global){{else}}pour les invités critiques et les changements de version majeure{{end}}. PatchWarden garde {{.SnapDefaults.Keep}} snapshot(s) par invité et refuse le snapshot, donc la mise à jour, si le stockage est rempli à {{.SnapDefaults.MaxPct}} % ou plus.</p>
+  {{end}}
+</section>
+
+{{else if eq .Tab "questions"}}
+<section class="card">
+  <h2>Questions posées par le script</h2>
+  {{if .Answers}}
+  <p class="small">Sans terminal, une question sans réponse fait échouer la mise à jour de l'application en plein milieu. Choisissez la réponse que PatchWarden donnera à chaque fois :</p>
+  <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/reponses">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{range $i, $a := .Answers}}
+    <fieldset class="answer">
+      <legend>« {{$a.Prompt}} »</legend>
+      <label><input type="radio" name="r{{$i}}" value="y" required {{if and $a.Set (eq $a.Value "y")}}checked{{end}}> oui</label>
+      <label><input type="radio" name="r{{$i}}" value="n" {{if and $a.Set (eq $a.Value "n")}}checked{{end}}> non</label>
+      <label><input type="radio" name="r{{$i}}" value="defaut" {{if and $a.Set (eq $a.Value "")}}checked{{end}}> réponse par défaut (Entrée)</label>
+      {{if not $a.Set}}<span class="b c">à renseigner</span>{{end}}
+    </fieldset>
+    {{end}}
+    <button type="submit" class="btn p">Enregistrer les réponses</button>
+  </form>
+  {{else}}<p class="muted">Le script de cet invité ne pose aucune question.</p>{{end}}
+</section>
+
+{{else if eq .Tab "historique"}}
 <section class="card">
   <h2>Historique</h2>
   {{if .Jobs}}
@@ -205,11 +217,13 @@
     <thead><tr><th>Date</th><th>Tâche</th><th>Statut</th><th>Résumé</th></tr></thead>
     <tbody>
     {{range .Jobs}}
-    <tr><td><a href="/taches/{{.ID}}">{{date .CreatedAt}}</a></td><td>{{.Kind}}{{if .DryRun}} (simulation){{end}}</td>
-      <td><span class="badge badge-{{statusClass .Status}}">{{.Status}}</span></td><td>{{if .Error}}<span class="crit">{{.Error}}</span>{{else}}{{.Summary}}{{end}}</td></tr>
+    <tr><td class="nowrap"><a href="/taches/{{.ID}}">{{date .CreatedAt}}</a></td><td>{{.Kind}}{{if .DryRun}} (simulation){{end}}</td>
+      <td><span class="b {{statusClass .Status}}">{{.Status}}</span></td><td>{{if .Error}}<span class="crit">{{.Error}}</span>{{else}}{{.Summary}}{{end}}</td></tr>
     {{end}}
     </tbody>
   </table></div>
   {{else}}<p class="muted">Aucune tâche.</p>{{end}}
 </section>
+{{end}}
+</div>
 {{end}}

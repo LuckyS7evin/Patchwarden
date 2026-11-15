@@ -1,7 +1,6 @@
 {{define "content"}}
 <div class="content">
-<form method="post" action="/lot/simuler">
-  <input type="hidden" name="csrf" value="{{.CSRF}}">
+<form method="get" action="/lot">
   <div class="pagehead">
     <div>
       <h1>À traiter</h1>
@@ -9,6 +8,7 @@
     </div>
   </div>
   {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
+  {{if .Tags}}<div class="tools"><a class="chip" href="/"{{if not .Tag}} aria-current="true"{{end}}>Tous les tags</a>{{range .Tags}}<a class="chip" href="/?tag={{.}}"{{if eq . $.Tag}} aria-current="true"{{end}}>{{.}}</a>{{end}}</div>{{end}}
 
   {{if not .Loaded}}<div class="empty">Première lecture de l'inventaire en cours…</div>
   {{else if not .Detected}}<div class="empty">Aucune détection pour l'instant. Lancez « Détecter tout » (lecture seule) pour savoir ce qui attend.</div>
@@ -23,7 +23,7 @@
   {{if not .Todo.Groups}}<div class="empty">Rien à traiter : tous les invités détectés sont à jour.</div>{{end}}
   {{range .Todo.Groups}}
   <section class="grp" aria-labelledby="g-{{.Key}}">
-    <div class="gh"><span class="t" id="g-{{.Key}}">{{.Title}}</span><span class="k">{{len .Items}}</span>{{with .Why}}<span class="why">{{.}}</span>{{end}}</div>
+    <div class="gh">{{if .Selectable}}<input type="checkbox" class="grp-all" data-groupe="g-{{.Key}}" aria-label="Tout sélectionner : {{.Title}}" hidden>{{end}}<span class="t" id="g-{{.Key}}">{{.Title}}</span><span class="k">{{len .Items}}</span>{{with .Why}}<span class="why">{{.}}</span>{{end}}</div>
     {{range .Items}}
     <div class="it">
       {{if .Sel}}<input type="checkbox" name="sel" value="{{.Sel}}" aria-label="Sélectionner {{.Guest.Name}}">{{else}}<span></span>{{end}}
@@ -44,8 +44,8 @@
   {{if .Selection}}
   <div class="batch" id="lot">
     <b id="lot-nombre">Sélection</b>
-    <span class="muted">simulation seulement, rien n'est modifié</span>
-    <button type="submit" class="btn p">Simuler la sélection</button>
+    <span class="muted">rien n'est lancé sans confirmation</span>
+    <button type="submit" class="btn p">Préparer le lot…</button>
     <button type="button" class="btn" id="lot-aucun" aria-label="Tout désélectionner">✕</button>
   </div>
   {{end}}

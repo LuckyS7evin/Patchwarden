@@ -41,6 +41,16 @@ type todoGroup struct {
 	Items           []todoItem
 }
 
+// Selectable dit si au moins un élément du groupe peut être sélectionné.
+func (g todoGroup) Selectable() bool {
+	for _, it := range g.Items {
+		if it.Sel != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // todo : la liste « À traiter » et son résumé.
 type todo struct {
 	Groups                                []todoGroup
@@ -63,6 +73,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 	major := todoGroup{Key: "majeures", Title: "Versions majeures", Why: "lisez le changelog ; snapshot pré-coché"}
 	apps := todoGroup{Key: "applis", Title: "Applications"}
 	apt := todoGroup{Key: "paquets", Title: "Autres paquets", Why: "mises à jour apt sans correctif de sécurité"}
+	restart := todoGroup{Key: "redemarrages", Title: "Redémarrages", Why: "processus qui utilisent encore les anciennes bibliothèques"}
 	maint := todoGroup{Key: "entretien", Title: "Entretien"}
 
 	for _, g := range snap.Guests {
@@ -85,11 +96,11 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			continue
 		}
 		self := isSelf != nil && isSelf(g)
-		sel := func(a engine.Action) string {
-			if self || !running {
+		sel := func(op engine.Op) string {
+			if self || !running || g.Critical {
 				return ""
 			}
-			return g.Key() + ":" + string(a)
+			return g.Key() + ":" + string(op)
 		}
 		icon := iconURL(g, &det)
 		pending := false
@@ -103,7 +114,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 				}
 			}
 			sort.SliceStable(pk, func(i, j int) bool { return pk[i].Since.Before(pk[j].Since) })
-			it := todoItem{Guest: g, Icon: icon, Sel: sel(engine.ActSecurity), TagClass: "c", Since: det.OldestSecurity(), Link: guestLink(g, "paquets")}
+			it := todoItem{Guest: g, Icon: icon, Sel: sel(engine.OpSecurity), TagClass: "c", Since: det.OldestSecurity(), Link: guestLink(g, "paquets")}
 			for i, p := range pk {
 				if i < 3 {
 					it.Pkgs = append(it.Pkgs, p.Name)
@@ -123,7 +134,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			}
 			pending, appUpdate = true, true
 			t.Versions++
-			it := todoItem{Guest: g, Icon: icon, Sel: sel(engine.ActFull), App: &a, Since: a.Since, Link: guestLink(g, "")}
+			it := todoItem{Guest: g, Icon: icon, Sel: sel(engine.OpFull), App: &a, Since: a.Since, Link: guestLink(g, "")}
 			if a.MajorChange() {
 				it.Tag, it.TagClass = "majeure", "v"
 				major.Items = append(major.Items, it)
@@ -134,7 +145,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 		}
 		if det.Apt.Total > 0 && det.Apt.Security == 0 && !appUpdate {
 			pending = true
-			it := todoItem{Guest: g, Icon: icon, Sel: sel(engine.ActFull), Tag: "apt", TagClass: "w", Link: guestLink(g, "paquets")}
+			it := todoItem{Guest: g, Icon: icon, Sel: sel(engine.OpFull), Tag: "apt", TagClass: "w", Link: guestLink(g, "paquets")}
 			it.Text = plural(det.Apt.Total, "paquet à mettre à jour", "paquets à mettre à jour")
 			for _, p := range det.Apt.Packages {
 				if it.Since.IsZero() || (!p.Since.IsZero() && p.Since.Before(it.Since)) {
@@ -143,10 +154,26 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			}
 			apt.Items = append(apt.Items, it)
 		}
-		if det.RebootRequired {
+		if units := det.RestartableUnits(); len(units) > 0 {
+			pending = true
+			shown := units
+			if len(shown) > 3 {
+				shown = shown[:3]
+			}
+			txt := plural(len(units), "service lié à d'anciennes bibliothèques", "services liés à d'anciennes bibliothèques") + " : " + strings.Join(shown, ", ")
+			if len(units) > 3 {
+				txt += "…"
+			}
+			restart.Items = append(restart.Items, todoItem{Guest: g, Icon: icon, Sel: sel(engine.OpServices), Text: txt, Tag: "services", TagClass: "w", Since: det.At, Link: guestLink(g, "")})
+		}
+		if det.RebootAdvised() {
 			pending = true
 			t.Reboots++
-			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: "redémarrage requis après une mise à jour", Tag: "redémarrage", TagClass: "w", Since: det.At, Link: guestLink(g, "")})
+			txt := "redémarrage requis après une mise à jour"
+			if !det.RebootRequired {
+				txt = "redémarrage du CT conseillé (processus système liés à d'anciennes bibliothèques)"
+			}
+			restart.Items = append(restart.Items, todoItem{Guest: g, Icon: icon, Sel: sel(engine.OpReboot), Text: txt, Tag: "redémarrage", TagClass: "w", Since: det.At, Link: guestLink(g, "")})
 		}
 		for _, sn := range det.Snap.PW {
 			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: "snapshot à supprimer une fois la mise à jour validée", Code: sn.Name, Tag: "snapshot", Since: sn.Time, Link: guestLink(g, "snapshots")})
@@ -164,7 +191,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			return a.Before(b)
 		})
 	}
-	for _, grp := range []*todoGroup{&sec, &major, &apps, &apt, &maint} {
+	for _, grp := range []*todoGroup{&sec, &major, &apps, &apt, &restart, &maint} {
 		bySince(grp.Items)
 		if len(grp.Items) > 0 {
 			t.Groups = append(t.Groups, *grp)
@@ -184,6 +211,8 @@ func plural(n int, one, many string) string {
 type todoData struct {
 	base
 	Todo      todo
+	Tags      []string // tags des invités présents dans la liste
+	Tag       string   // filtre courant
 	Activity  []jobs.Job
 	Loaded    bool
 	Detected  bool // au moins une détection
@@ -200,7 +229,32 @@ func (s *Server) todoPage(w http.ResponseWriter, r *http.Request, se *session) {
 		Loaded:   !snap.FetchedAt.IsZero(),
 		Detected: len(all) > 0,
 		Error:    r.URL.Query().Get("erreur"),
+		Tag:      r.URL.Query().Get("tag"),
 	}
+	tags := map[string]bool{}
+	var groups []todoGroup
+	for _, g := range d.Todo.Groups {
+		var items []todoItem
+		for _, it := range g.Items {
+			for _, t := range it.Guest.Tags {
+				if !strings.EqualFold(t, s.cfg.Policy.CommunityScriptTag) {
+					tags[t] = true
+				}
+			}
+			if d.Tag == "" || hasTag(it.Guest.Tags, d.Tag) {
+				items = append(items, it)
+			}
+		}
+		if len(items) > 0 {
+			g.Items = items
+			groups = append(groups, g)
+		}
+	}
+	d.Todo.Groups = groups
+	for t := range tags {
+		d.Tags = append(d.Tags, t)
+	}
+	sort.Strings(d.Tags)
 	if s.deps.Jobs != nil {
 		d.Activity = s.deps.Jobs.List("", 8)
 	}
@@ -214,52 +268,12 @@ func (s *Server) todoPage(w http.ResponseWriter, r *http.Request, se *session) {
 	s.render(w, "traiter", http.StatusOK, d)
 }
 
-// batchSimulate lance la simulation de chaque élément sélectionné. Les lots
-// réels (avec confirmation) arrivent au jalon 6.
-func (s *Server) batchSimulate(w http.ResponseWriter, r *http.Request, se *session) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Formulaire invalide", http.StatusBadRequest)
-		return
-	}
-	snap, _ := s.inv.Current()
-	byKey := map[string]inventory.Guest{}
-	for _, g := range snap.Guests {
-		byKey[g.Key()] = g
-	}
-	// Un invité choisi pour « sécurité » et « tout » n'est simulé qu'une fois,
-	// en « tout mettre à jour ».
-	want := map[string]engine.Action{}
-	var order []string
-	for _, v := range r.PostForm["sel"] {
-		key, act, ok := strings.Cut(v, ":")
-		a, err := engine.ParseAction(act)
-		if !ok || err != nil {
-			continue
-		}
-		if prev, seen := want[key]; !seen {
-			order = append(order, key)
-			want[key] = a
-		} else if prev == engine.ActSecurity && a == engine.ActFull {
-			want[key] = a
+
+func hasTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if strings.EqualFold(t, want) {
+			return true
 		}
 	}
-	started, skipped := 0, 0
-	for _, key := range order {
-		g, ok := byKey[key]
-		if !ok {
-			skipped++
-			continue
-		}
-		if _, err := s.deps.Engine.Execute(g, want[key], true, se.user, false, "", false); err != nil {
-			skipped++
-			continue
-		}
-		started++
-	}
-	s.log.Info("simulation par lot", "lancées", started, "ignorées", skipped, "par", se.user)
-	if started == 0 && skipped == 0 {
-		http.Redirect(w, r, "/?erreur="+url.QueryEscape("aucun invité sélectionné"), http.StatusSeeOther)
-		return
-	}
-	http.Redirect(w, r, fmt.Sprintf("/taches?simulations=%d&ignores=%d", started, skipped), http.StatusSeeOther)
+	return false
 }

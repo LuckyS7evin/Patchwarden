@@ -60,6 +60,7 @@ func (s *Server) detectAll(w http.ResponseWriter, r *http.Request, se *session) 
 
 type jobsData struct {
 	base
+	Batches                       []engine.Batch
 	Jobs                          []jobs.Job
 	Started, Skipped, Simulations string
 	RunningOrQueued               int
@@ -67,6 +68,9 @@ type jobsData struct {
 
 func (s *Server) jobsPage(w http.ResponseWriter, r *http.Request, se *session) {
 	d := jobsData{base: s.base("Tâches", "taches", se), Jobs: s.deps.Jobs.List("", 200)}
+	if s.deps.Batches != nil {
+		d.Batches = s.deps.Batches.List(5)
+	}
 	q := r.URL.Query()
 	d.Started, d.Skipped, d.Simulations = q.Get("lancees"), q.Get("ignores"), q.Get("simulations")
 	for _, j := range d.Jobs {

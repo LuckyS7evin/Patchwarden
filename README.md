@@ -15,7 +15,7 @@ de mémoire, sans agent dans les invités.
 | 3 | Mises à jour d'un LXC : simulation, « Sécurité uniquement », « Tout mettre à jour » (apt + `update` community-scripts), confirmation | ✅ |
 | 4 | Détection planifiée, notifications (ntfy, Gotify, webhook), vue sécurité | ✅ |
 | 5 | Snapshots avant mise à jour, retour arrière en un clic | ✅ |
-| 6 | Lots, regroupement par tags, redémarrages requis | à faire |
+| 6 | Lots, regroupement par tags, redémarrages requis | ✅ |
 | 7 | VMs (guest agent), OMV/PBS, fin de support des OS | à faire |
 | 8 | Docker (API Portainer) | à faire |
 | 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique, métriques Prometheus | à faire |
@@ -64,6 +64,15 @@ Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/
     Paquets, Snapshots, Questions du script, Historique ;
   - **tâche en direct** : étapes (snapshot, apt, appli, vérification) qui avancent avec le
     journal, terminal à côté, lien de retour au snapshot ;
+  - **lots** : les éléments cochés dans « À traiter », ou tous les invités d'un tag (inventaire
+    groupé par tag), forment un lot à confirmer : opération par invité, snapshot par invité,
+    « arrêter au premier échec » ; simulation du lot ou application ; les opérations
+    s'enchaînent une par une, suivies sur la page du lot ; une seule notification par lot.
+    Les invités à confirmation renforcée (OMV, PBS, tag `critique`) restent un par un ;
+  - **redémarrages** : la détection repère les processus qui utilisent encore une
+    bibliothèque remplacée par une mise à jour (correctif inactif tant qu'ils tournent) ;
+    « Redémarrer les services » (services système exclus) ou « Redémarrer le CT », depuis
+    la fiche ou en lot ;
   - **Snapshots** (tous les snapshots PatchWarden), **Réglages** (configuration en lecture
     seule, sans secret) ;
   - menu latéral avec l'état des nœuds (CPU, RAM, stockage des invités le plus rempli) ;
@@ -315,7 +324,7 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v5) | Effet |
+| Verbe (wrapper v7) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
@@ -325,6 +334,8 @@ le wrapper, relisible sur le nœud.
 | `lxc-snapshot <vmid> <nom> <garder> <seuil> <0\|1> <description>` | `pct snapshot` (nom `pw-AAAAMMJJ-HHMM-action` exigé), après vérification du stockage (`pvesh …/feature`, `pvesm status`) ; puis `pct delsnapshot` des snapshots PatchWarden au-delà de `garder`. `1` = vérification seule |
 | `lxc-snapdel <vmid> <nom>` | `pct delsnapshot` d'un snapshot PatchWarden (`pw-…`) uniquement |
 | `lxc-rollback <vmid> <nom>` | `pct rollback` vers un snapshot PatchWarden (`pw-…`) uniquement, puis `pct start` si le CT tournait |
+| `lxc-restart-services <vmid>` | Dans le CT : `systemctl restart` des services encore liés à une bibliothèque remplacée (liste établie dans le CT, jamais transmise par PatchWarden ; dbus, `systemd-*`, sessions et consoles exclus) |
+| `lxc-reboot <vmid>` | `pct reboot` du CT, puis attente qu'il soit de nouveau démarré |
 
 Le wrapper refuse de lui-même tout snapshot dont le nom n'est pas `pw-…` : même une instance
 PatchWarden compromise ne pourrait ni supprimer ni restaurer vos snapshots manuels. Il lit
@@ -336,7 +347,9 @@ connexion SSH est perdue (redémarrage de PatchWarden, réseau), l'opération se
 même, ressources restaurées comprises. Leur journal complet reste 30 jours sur le nœud dans
 `/var/log/patchwarden/`. Le wrapper écrit donc sur l'hôte uniquement ce journal et un fichier
 de verrou dans `/run/lock`, et lance `pct set` (ressources), `pct snapshot`,
-`pct delsnapshot`, `pct rollback` et `pct start` sur le CT visé ; rien d'autre.
+`pct delsnapshot`, `pct rollback`, `pct start` et `pct reboot` sur le CT visé ; rien d'autre.
+La détection lit aussi, dans le CT, `/proc/*/maps` et `/proc/*/cgroup` pour repérer les
+processus encore liés à une bibliothèque remplacée (lecture seule).
 
 ## Sécurité
 

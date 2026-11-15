@@ -76,6 +76,16 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 			stepView{Label: "Redémarrage", Detail: "s'il tournait avant", Start: "PW: redémarrage du CT|PW: état après", Done: "PW: état après"},
 			stepView{Label: "Vérification", Detail: "détection après le retour arrière", Start: "▶ lxc-detect", Done: "pw.end=1"},
 		)
+	case jobs.KindServices:
+		steps = append(steps,
+			stepView{Label: "Redémarrage des services", Detail: "systemctl restart, services système exclus", Start: "▶ lxc-restart-services", Done: "pw.restarted="},
+			stepView{Label: "Vérification", Detail: "détection après le redémarrage", Start: "▶ lxc-detect", Done: "pw.end=1"},
+		)
+	case jobs.KindReboot:
+		steps = append(steps,
+			stepView{Label: "Redémarrage du CT", Detail: "pct reboot", Start: "▶ lxc-reboot", Done: "PW: état après"},
+			stepView{Label: "Vérification", Detail: "détection après le redémarrage", Start: "▶ lxc-detect", Done: "pw.end=1"},
+		)
 	default:
 		return nil
 	}

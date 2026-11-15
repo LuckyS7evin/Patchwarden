@@ -24,7 +24,11 @@
   <div class="tools">
     {{range .Views}}<a class="chip" href="{{.URL}}"{{if .Current}} aria-current="true"{{end}}>{{.Label}} <b>{{.Count}}</b></a>{{end}}
     <span class="sp"></span>
+    <span class="muted small">Grouper :</span>
+    <a class="chip" href="{{.GroupNode}}"{{if not .ByTag}} aria-current="true"{{end}}>par nœud</a>
+    <a class="chip" href="{{.GroupTag}}"{{if .ByTag}} aria-current="true"{{end}}>par tag</a>
     <form method="get" action="/inventaire">
+      {{if .ByTag}}<input type="hidden" name="grouper" value="tag">{{end}}
       {{with .Filter.View}}<input type="hidden" name="vue" value="{{.}}">{{end}}
       {{with .Filter.Q}}<input type="hidden" name="q" value="{{.}}">{{end}}
       <select name="noeud" aria-label="Nœud"><option value="">tous les nœuds</option>{{range .Nodes}}<option value="{{.}}"{{if eq . $.Filter.Node}} selected{{end}}>{{.}}</option>{{end}}</select>
@@ -42,7 +46,10 @@
     <thead><tr><th>Invité</th><th>État</th><th>Mises à jour</th><th>Détection</th><th><span class="muted small">cliquer une ligne : aperçu</span></th></tr></thead>
     {{range .Groups}}
     <tbody>
-      <tr class="grp"><td colspan="5">{{.Node}} · {{len .Rows}} invité(s)</td></tr>
+      <tr class="grp"><td colspan="5">{{.Node}} · {{len .Rows}} invité(s)
+        {{- if and $.ByTag (ne .Node "sans tag")}}{{if or .Sec .Upd}}<span class="grp-acts"> · préparer un lot :
+          {{if .Sec}}<a href="/lot?tag={{.Node}}&amp;op=securite">sécurité ({{.Sec}})</a>{{end}}
+          {{if and .Sec .Upd}} · {{end}}{{if .Upd}}<a href="/lot?tag={{.Node}}&amp;op=complet">tout ({{.Upd}})</a>{{end}}</span>{{end}}{{end}}</td></tr>
       {{range .Rows}}
       <tr data-apercu="/invites/{{.Node}}/{{.VMID}}/apercu" data-fiche="/invites/{{.Node}}/{{.VMID}}"{{if .Stale}} class="stale"{{end}}>
         <td><div class="tn"><img class="ic" src="{{.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a><span class="id">{{.TypeLabel}} {{.VMID}}</span>

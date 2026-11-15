@@ -180,6 +180,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("réglages de snapshot des invités : %w", err)
 	}
+	batches, err := engine.OpenBatches(cfg.Jobs.DataDir)
+	if err != nil {
+		return fmt.Errorf("lots : %w", err)
+	}
 	hostname, _ := os.Hostname()
 	up := upstream.New(cfg.Upstream.GitHubToken, cfg.Upstream.CacheTTL.Duration, nil)
 	up.GitHubAPI = strings.TrimRight(cfg.Upstream.GitHubAPI, "/")
@@ -197,6 +201,7 @@ func serve(args []string) error {
 		PublicURL:  cfg.Server.PublicURL,
 		Snap:       engine.SnapConfig{Default: cfg.Snapshots.Default, Keep: cfg.Snapshots.Keep, MaxPct: cfg.Snapshots.MaxStoragePct},
 		SnapPrefs:  snapPrefs,
+		Batches:    batches,
 	}
 	jm.OnFinish = eng.NotifyJob
 	if cfg.SSH.Enabled() {
@@ -212,7 +217,7 @@ func serve(args []string) error {
 		snap, _ := inv.Current()
 		eng.ScheduledDetection(ctx, snap.Guests)
 	}, log)
-	ui, err := web.New(cfg, inv, web.Deps{Engine: eng, Jobs: jm, Detections: store, NextDetection: sched.Next}, log, version)
+	ui, err := web.New(cfg, inv, web.Deps{Engine: eng, Jobs: jm, Detections: store, Batches: batches, NextDetection: sched.Next}, log, version)
 	if err != nil {
 		return err
 	}

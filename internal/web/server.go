@@ -44,6 +44,17 @@ type Engine interface {
 	SnapPref(key string) string
 	SetSnapPref(key, v string) error
 	SnapDefaults() engine.SnapConfig
+	PlanRestart(g inventory.Guest) engine.RestartPlan
+	RestartServices(g inventory.Guest, user string, confirmed bool) (jobs.Job, error)
+	Reboot(g inventory.Guest, user string, confirmed bool, typedName string) (jobs.Job, error)
+	PreviewBatch(reqs []engine.BatchRequest) []string
+	StartBatch(reqs []engine.BatchRequest, dryRun, stopOnFail bool, user string) (engine.Batch, error)
+}
+
+// Batches donne accès aux lots.
+type Batches interface {
+	Get(id string) (engine.Batch, bool)
+	List(limit int) []engine.Batch
 }
 
 // Jobs donne accès aux tâches et à leur journal.
@@ -66,6 +77,7 @@ type Deps struct {
 	Engine     Engine
 	Jobs       Jobs
 	Detections Detections
+	Batches    Batches
 	// NextDetection renvoie la prochaine détection planifiée (zéro : aucune).
 	NextDetection func() time.Time
 }
@@ -154,6 +166,19 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		"inc":       func(i int) int { return i + 1 },
 		"sub":       func(a, b int) int { return a - b },
 		"lineClass": lineClass,
+		"itemClass": func(st string) string {
+			switch st {
+			case engine.ItemSuccess:
+				return "ok"
+			case engine.ItemFailed:
+				return "c"
+			case engine.ItemRunning:
+				return "a"
+			case engine.ItemCancelled:
+				return "w"
+			}
+			return ""
+		},
 	}
 	funcs["upper"] = strings.ToUpper
 	funcs["level"] = level
@@ -168,7 +193,7 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		return sinceLabel(s.now().Sub(t))
 	}
 	s.pages = map[string]*template.Template{}
-	for _, p := range []string{"connexion", "traiter", "inventaire", "invite", "taches", "tache", "action", "restaurer", "snapshots", "reglages"} {
+	for _, p := range []string{"connexion", "traiter", "inventaire", "invite", "taches", "tache", "action", "restaurer", "snapshots", "reglages", "lot", "lots", "redemarrage"} {
 		t, err := template.New("layout.html").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/partiels.html", "templates/"+p+".html")
 		if err != nil {
 			return nil, fmt.Errorf("gabarit %s : %w", p, err)
@@ -195,7 +220,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /deconnexion", s.sameOrigin(s.authed(s.csrf(s.logout))))
 	mux.HandleFunc("GET /{$}", s.authed(s.todoPage))
 	mux.HandleFunc("GET /inventaire", s.authed(s.inventoryPage))
-	mux.HandleFunc("POST /lot/simuler", s.sameOrigin(s.authed(s.csrf(s.batchSimulate))))
+	mux.HandleFunc("GET /lot", s.authed(s.batchPrepare))
+	mux.HandleFunc("POST /lot", s.sameOrigin(s.authed(s.csrf(s.batchSubmit))))
+	mux.HandleFunc("GET /lots/{id}", s.authed(s.batchPage))
+	mux.HandleFunc("GET /invites/{node}/{vmid}/redemarrage", s.authed(s.restartPage))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/redemarrage", s.sameOrigin(s.authed(s.csrf(s.restartSubmit))))
 	mux.HandleFunc("GET /snapshots", s.authed(s.snapshotsPage))
 	mux.HandleFunc("GET /reglages", s.authed(s.settingsPage))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/apercu", s.authed(s.previewFragment))
@@ -383,8 +412,10 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request, _ *session) {
 }
 
 type nodeGroup struct {
-	Node string
+	Node string // nœud, ou tag quand l'inventaire est groupé par tag
 	Rows []row
+	Sec  int // invités avec des correctifs de sécurité (groupe par tag)
+	Upd  int // invités avec des mises à jour
 }
 
 // row est un invité tel qu'affiché : sa dernière détection, sa tâche en cours
@@ -529,16 +560,18 @@ type kpis struct {
 
 type inventoryData struct {
 	base
-	Loaded, Refreshing bool
-	Age, FetchedAt     string
-	Errors             []string
-	K                  kpis
-	Views              []view
-	Shown              int
-	Groups             []nodeGroup
-	Nodes, Tags        []string
-	Filter             filter
-	Query              string
+	Loaded, Refreshing  bool
+	Age, FetchedAt      string
+	Errors              []string
+	K                   kpis
+	Views               []view
+	Shown               int
+	Groups              []nodeGroup
+	Nodes, Tags         []string
+	Filter              filter
+	Query               string
+	ByTag               bool
+	GroupNode, GroupTag string // liens « grouper par »
 }
 
 func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *session) {
@@ -551,6 +584,14 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 		Nodes: snap.Nodes(), Filter: f, Query: r.URL.RawQuery,
 	}
 	d.Search = f.Q
+	d.ByTag = q.Get("grouper") == "tag"
+	{
+		v := r.URL.Query()
+		v.Del("grouper")
+		d.GroupNode = "/inventaire?" + v.Encode()
+		v.Set("grouper", "tag")
+		d.GroupTag = "/inventaire?" + v.Encode()
+	}
 	if d.Loaded {
 		d.Age = humanAge(s.now().Sub(snap.FetchedAt))
 		d.FetchedAt = snap.FetchedAt.Local().Format("02/01/2006 15:04:05")
@@ -599,12 +640,32 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 			continue
 		}
 		d.Shown++
-		ng, ok := groups[g.Node]
-		if !ok {
-			ng = &nodeGroup{Node: g.Node}
-			groups[g.Node] = ng
+		keys := []string{g.Node}
+		if d.ByTag {
+			keys = nil
+			for _, t := range rw.ShownTags {
+				keys = append(keys, t)
+			}
+			if len(keys) == 0 {
+				keys = []string{"sans tag"}
+			}
 		}
-		ng.Rows = append(ng.Rows, rw)
+		for _, k := range keys {
+			ng, ok := groups[k]
+			if !ok {
+				ng = &nodeGroup{Node: k}
+				groups[k] = ng
+			}
+			ng.Rows = append(ng.Rows, rw)
+			if rw.Det != nil && g.Type == "lxc" && !g.Critical {
+				if rw.Det.Apt.Security > 0 {
+					ng.Sec++
+				}
+				if rw.Det.Apt.Total > 0 || rw.Det.AppUpdates() > 0 {
+					ng.Upd++
+				}
+			}
+		}
 	}
 	for i, v := range views {
 		d.Views = append(d.Views, view{Key: v.key, Label: v.label, Count: counts[i], Current: v.key == f.View, URL: f.query(v.key)})
@@ -617,9 +678,25 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 			d.K.Storage, d.K.StoragePct = stor.Name+" ("+n+")", best
 		}
 	}
-	for _, n := range d.Nodes {
-		if ng, ok := groups[n]; ok {
-			d.Groups = append(d.Groups, *ng)
+	if d.ByTag {
+		names := make([]string, 0, len(groups))
+		for k := range groups {
+			if k != "sans tag" {
+				names = append(names, k)
+			}
+		}
+		sort.Strings(names)
+		if _, ok := groups["sans tag"]; ok {
+			names = append(names, "sans tag")
+		}
+		for _, k := range names {
+			d.Groups = append(d.Groups, *groups[k])
+		}
+	} else {
+		for _, n := range d.Nodes {
+			if ng, ok := groups[n]; ok {
+				d.Groups = append(d.Groups, *ng)
+			}
 		}
 	}
 	for t := range tags {

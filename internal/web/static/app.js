@@ -59,6 +59,14 @@
       count.textContent = n + (n > 1 ? " invités sélectionnés" : " invité sélectionné");
     };
     boxes.forEach(function (b) { b.addEventListener("change", update); });
+    form.querySelectorAll(".grp-all").forEach(function (all) {
+      all.hidden = false;
+      var sec = all.closest("section");
+      all.addEventListener("change", function () {
+        sec.querySelectorAll("input[name=sel]").forEach(function (b) { b.checked = all.checked; });
+        update();
+      });
+    });
     var none = document.getElementById("lot-aucun");
     if (none) none.addEventListener("click", function () { boxes.forEach(function (b) { b.checked = false; }); update(); });
     update();

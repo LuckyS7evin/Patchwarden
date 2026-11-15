@@ -45,6 +45,7 @@ delsnapshot)
 	echo "pct delsnapshot $2 $3" >> "$PCT_SET_LOG"
 	grep -v "^$3 " "$FAKE_GUEST/snaps" > "$FAKE_GUEST/snaps.tmp"; mv "$FAKE_GUEST/snaps.tmp" "$FAKE_GUEST/snaps"; exit 0 ;;
 rollback) echo "pct rollback $2 $3" >> "$PCT_SET_LOG"; touch "$FAKE_GUEST/stopped"; exit 0 ;;
+reboot) echo "pct reboot $2 $3 $4" >> "$PCT_SET_LOG"; [ -n "$FAKE_REBOOT_FAIL" ] && exit 1; rm -rf "$FAKE_GUEST/proc/"[0-9]*; exit 0 ;;
 start) echo "pct start $2" >> "$PCT_SET_LOG"; rm -f "$FAKE_GUEST/stopped"; exit 0 ;;
 set)
 	shift 2; echo "pct set $*" >> "$PCT_SET_LOG"
@@ -61,7 +62,7 @@ set)
 	exit 0 ;;
 exec)
 	shift 2; [ "$1" = "--" ] && shift
-	script="$(cat | sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g" -e "s#/proc/meminfo#$FAKE_GUEST/proc/meminfo#g")"
+	script="$(cat | sed -e "s#/usr/bin/update#$FAKE_GUEST/usr/bin/update#g" -e "s#/root/\.#$FAKE_GUEST/root/.#g" -e "s#/proc/meminfo#$FAKE_GUEST/proc/meminfo#g" -e "s#PROCDIR=/proc#PROCDIR=$FAKE_GUEST/proc#g")"
 	# nproc vu depuis le CT : applique les CPU en attente quand le délai est écoulé.
 	script="nproc() {
 		if [ -f \"\$FAKE_GUEST/cores.pending\" ]; then
@@ -94,6 +95,19 @@ case "$2" in
 	print JSON::PP->new->encode(\@a);' "$FAKE_GUEST/snaps" ;;
 *) exit 1 ;;
 esac
+`
+
+// Faux systemctl (dans le CT) : « redémarre » un service en supprimant ses
+// processus du faux /proc.
+const fakeSystemctl = `#!/bin/bash
+[ "$1" = restart ] || exit 0
+u="$3"
+echo "systemctl restart $u" >> "$PCT_SET_LOG"
+[ -n "$FAKE_SYSTEMCTL_FAIL" ] && [ "$u" = "$FAKE_SYSTEMCTL_FAIL" ] && exit 1
+for d in "$FAKE_GUEST"/proc/[0-9]*; do
+	grep -q "/$u\$" "$d/cgroup" 2>/dev/null && rm -rf "$d"
+done
+exit 0
 `
 
 // Faux pvesm : remplissage du stockage (FAKE_STORAGE_PCT).
@@ -163,7 +177,7 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	for _, id := range []string{"104", "108"} {
+	for _, id := range []string{"104", "105", "108"} {
 		if err := os.WriteFile(filepath.Join(pve, "nodes", "loki", "lxc", id+".conf"), []byte("cores: 2\nmemory: 2048\nrootfs: local-lvm:vm-"+id+"-disk-0,size=8G\nmp0: /srv/partage,mp=/partage\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -179,6 +193,7 @@ func setup(t *testing.T) *env {
 	writeExec(t, filepath.Join(bin, "apt-get"), fakeApt)
 	writeExec(t, filepath.Join(bin, "pvesh"), fakePvesh)
 	writeExec(t, filepath.Join(bin, "pvesm"), fakePvesm)
+	writeExec(t, filepath.Join(bin, "systemctl"), fakeSystemctl)
 	// Un snapshot manuel, que PatchWarden ne doit jamais toucher.
 	_ = os.WriteFile(filepath.Join(guest, "snaps"), []byte("avant-maj 1700000000 snapshot manuel\n"), 0o644)
 	writeExec(t, filepath.Join(bin, "hostname"), "#!/bin/sh\necho loki\n")
@@ -245,6 +260,10 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	batches, err := OpenBatches(data)
+	if err != nil {
+		t.Fatal(err)
+	}
 	up := upstream.New("", time.Hour, web.Client())
 	up.GitHubAPI = web.URL + "/gh"
 	nodes := map[string]string{"loki": srv.Addr}
@@ -254,7 +273,7 @@ func setup(t *testing.T) *env {
 		Scripts: cs.NewFetcher([]string{base}, time.Hour, web.Client()), Upstream: up,
 		Website: "https://community-scripts.org", AptRefresh: true, Timeout: time.Minute, Log: log,
 		Answers: answers, SelfGuest: "loki/103",
-		Snap: SnapConfig{Keep: 1, MaxPct: 90}, SnapPrefs: prefs,
+		Snap: SnapConfig{Keep: 1, MaxPct: 90}, SnapPrefs: prefs, Batches: batches,
 	}
 	return &env{eng: eng, server: srv, base: base, web: web, root: root, guest: inventory.Guest{Node: "loki", Type: "lxc", VMID: 104, Name: "termix", Status: "running", CommunityScript: true}}
 }

@@ -26,6 +26,9 @@ func (e *Engine) NotifyJob(j jobs.Job) {
 	if e.Notify == nil || j.Kind == jobs.KindDetect || j.DryRun {
 		return
 	}
+	if e.Batches != nil && e.Batches.FromBatch(j.ID) {
+		return // un seul message pour tout le lot (notifyBatch)
+	}
 	name := fmt.Sprintf("%s (%s/%d)", j.Target.Name, j.Target.Node, j.Target.VMID)
 	m := notify.Message{URL: e.link("/taches/" + j.ID)}
 	switch j.Status {

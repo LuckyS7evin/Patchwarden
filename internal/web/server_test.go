@@ -30,6 +30,11 @@ type fakeEngine struct {
 	prefs    map[string]string
 	lastSnap *bool
 	rolled   string
+	// Lots et redémarrages.
+	restarted           []string
+	batch               []engine.BatchRequest
+	batchDry, batchStop bool
+	batches             []engine.Batch
 }
 
 func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
@@ -91,6 +96,69 @@ func (f *fakeEngine) SetSnapPref(key, v string) error {
 }
 
 func (f *fakeEngine) SnapDefaults() engine.SnapConfig { return engine.SnapConfig{Keep: 1, MaxPct: 90} }
+
+func (f *fakeEngine) PlanRestart(g inventory.Guest) engine.RestartPlan {
+	p := engine.RestartPlan{Guest: g, NeedName: g.Critical}
+	if g.Type != "lxc" || g.Status != "running" {
+		p.Why = "non éligible"
+		return p
+	}
+	p.Units, p.Reboot = []string{"nginx.service"}, true
+	return p
+}
+
+func (f *fakeEngine) RestartServices(g inventory.Guest, user string, confirmed bool) (jobs.Job, error) {
+	if !confirmed {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	f.restarted = append(f.restarted, "services:"+g.Key())
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindServices, t, false, user, func(context.Context, jobs.Job, jobs.Logger) (string, error) { return "ok", nil })
+}
+
+func (f *fakeEngine) Reboot(g inventory.Guest, user string, confirmed bool, typed string) (jobs.Job, error) {
+	if !confirmed || (g.Critical && typed != g.Name) {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	f.restarted = append(f.restarted, "ct:"+g.Key())
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindReboot, t, false, user, func(context.Context, jobs.Job, jobs.Logger) (string, error) { return "ok", nil })
+}
+
+func (f *fakeEngine) PreviewBatch(reqs []engine.BatchRequest) []string {
+	out := make([]string, len(reqs))
+	for i, r := range reqs {
+		if r.Guest.Critical {
+			out[i] = "invité à confirmation renforcée"
+		}
+	}
+	return out
+}
+
+func (f *fakeEngine) StartBatch(reqs []engine.BatchRequest, dry, stop bool, user string) (engine.Batch, error) {
+	if len(reqs) == 0 {
+		return engine.Batch{}, engine.ErrEmptyBatch
+	}
+	f.batch = reqs
+	f.batchDry, f.batchStop = dry, stop
+	b := engine.Batch{ID: "lot-test", By: user, DryRun: dry, StopOnFail: stop, Status: engine.BatchDone, CreatedAt: time.Now()}
+	for _, r := range reqs {
+		b.Items = append(b.Items, engine.BatchItem{Node: r.Guest.Node, VMID: r.Guest.VMID, Name: r.Guest.Name, Op: r.Op, Snapshot: r.Snapshot, Status: engine.ItemSuccess})
+	}
+	f.batches = append(f.batches, b)
+	return b, nil
+}
+
+func (f *fakeEngine) Get(id string) (engine.Batch, bool) {
+	for _, b := range f.batches {
+		if b.ID == id {
+			return b, true
+		}
+	}
+	return engine.Batch{}, false
+}
+
+func (f *fakeEngine) List(int) []engine.Batch { return f.batches }
 
 func (f *fakeEngine) Execute(g inventory.Guest, a engine.Action, dry bool, user string, confirmed bool, name string, snapshot bool) (jobs.Job, error) {
 	f.lastSnap = &snapshot
@@ -200,7 +268,7 @@ func newHarness(t *testing.T) *harness {
 	store, _ := detect.OpenStore(dir)
 	eng := &fakeEngine{jm: jm}
 	next := time.Date(2026, 11, 15, 3, 40, 0, 0, time.Local)
-	srv, err := New(cfg, inv, Deps{Engine: eng, Jobs: jm, Detections: store, NextDetection: func() time.Time { return next }}, log, "test")
+	srv, err := New(cfg, inv, Deps{Engine: eng, Jobs: jm, Detections: store, Batches: eng, NextDetection: func() time.Time { return next }}, log, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +665,7 @@ func TestTodoPage(t *testing.T) {
 	}}, Apps: []detect.App{{Name: "termix", Installed: "1.0.0", InstalledKnown: true, Latest: "2.0.0", Since: old}}})
 	_, body := h.do("GET", "/", nil, nil)
 	for _, want := range []string{"À traiter", ">2</b>correctifs de sécurité", "termix", "depuis 3 j", ">libssl3t64<", ">curl<", "2 correctifs",
-		`value="loki/104:securite"`, "Versions majeures", `value="loki/104:complet"`, "Simuler la sélection"} {
+		`value="loki/104:securite"`, "Versions majeures", `value="loki/104:complet"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("« À traiter » sans %q", want)
 		}
@@ -609,20 +677,90 @@ func TestTodoPage(t *testing.T) {
 		t.Errorf("ancienne page sécurité : %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 
-	// Simulation par lot : un seul passage par invité, en « tout mettre à jour ».
-	_ = h.eng.SetAnswers("loki/104", map[string]string{nginxQ: "y"})
+	if !strings.Contains(body, `action="/lot"`) || !strings.Contains(body, "Préparer le lot…") {
+		t.Error("barre de sélection : préparation du lot attendue")
+	}
+}
+
+func TestBatchFlow(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, Apt: detect.Apt{Present: true, Total: 3, Security: 2, SecurityStrict: 2}})
+	// Préparation : sélection depuis « À traiter » (le doublon garde la première opération).
+	_, page := h.do("GET", "/lot?sel=loki/104:securite&sel=loki/104:complet&sel=loki/203:securite&sel=loki/9999:securite&sel=n%27importe", nil, nil)
+	for _, want := range []string{"Préparer un lot", `name="cle_0" value="loki/104"`, "3 paquets", `name="cle_1" value="loki/203"`, "ignoré : invité à confirmation renforcée", "Arrêter le lot au premier échec", "Appliquer le lot"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("préparation sans %q", want)
+		}
+	}
+	if strings.Contains(page, "cle_2") || !strings.Contains(page, `value="complet" selected`) {
+		t.Error("invité inconnu gardé, ou « tout » n'a pas remplacé « sécurité » pour le même invité")
+	}
 	tok := h.csrf()
-	resp, _ := h.do("POST", "/lot/simuler", url.Values{"csrf": {tok}, "sel": {"loki/104:securite", "loki/104:complet", "loki/9999:securite", "nimportequoi"}}, nil)
-	if loc := resp.Header.Get("Location"); loc != "/taches?simulations=1&ignores=1" {
-		t.Errorf("simulation par lot : %s", loc)
+	form := url.Values{"csrf": {tok}, "cle_0": {"loki/104"}, "op_0": {"complet"}, "garder_0": {"1"}, "snap_0": {"1"}, "cle_1": {"loki/203"}, "op_1": {"securite"}, "arret": {"1"}, "mode": {"appliquer"}}
+	resp, _ := h.do("POST", "/lot", form, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "erreur=") || h.eng.batch != nil {
+		t.Errorf("lot appliqué sans confirmation : %s", resp.Header.Get("Location"))
 	}
-	list := h.jm.List("loki/104", 10)
-	if len(list) != 1 || !list[0].DryRun || list[0].Kind != jobs.KindFull {
-		t.Errorf("tâches : %+v", list)
+	form.Set("confirme", "1")
+	resp, _ = h.do("POST", "/lot", form, nil)
+	if resp.Header.Get("Location") != "/lots/lot-test" || len(h.eng.batch) != 1 || h.eng.batch[0].Op != engine.OpFull || !h.eng.batch[0].Snapshot || h.eng.batchDry || !h.eng.batchStop {
+		t.Fatalf("lot : %s %+v dry=%v stop=%v", resp.Header.Get("Location"), h.eng.batch, h.eng.batchDry, h.eng.batchStop)
 	}
-	resp, _ = h.do("POST", "/lot/simuler", url.Values{"csrf": {tok}}, nil)
-	if !strings.Contains(resp.Header.Get("Location"), "erreur=") {
-		t.Errorf("lot vide : %s", resp.Header.Get("Location"))
+	form.Set("mode", "simulation")
+	form.Del("confirme")
+	if resp, _ := h.do("POST", "/lot", form, nil); resp.Header.Get("Location") != "/lots/lot-test" || !h.eng.batchDry {
+		t.Error("la simulation ne demande pas de confirmation")
+	}
+	_, lot := h.do("GET", "/lots/lot-test", nil, nil)
+	if !strings.Contains(lot, "tout mettre à jour") || !strings.Contains(lot, "réussie") {
+		t.Error("page du lot incomplète")
+	}
+	if _, tasks := h.do("GET", "/taches", nil, nil); !strings.Contains(tasks, "Lots récents") || !strings.Contains(tasks, `href="/lots/lot-test"`) {
+		t.Error("lots absents de la page des tâches")
+	}
+	// Lot par tag, depuis l'inventaire groupé par tag.
+	snap := h.inv.snap
+	snap.Guests[0].Tags = append(snap.Guests[0].Tags, "media")
+	h.inv.snap = snap
+	_, inv := h.do("GET", "/inventaire?grouper=tag", nil, nil)
+	if !strings.Contains(inv, `href="/lot?tag=media&amp;op=securite"`) || !strings.Contains(inv, "sans tag") {
+		t.Error("groupes par tag ou lien de lot absents")
+	}
+	_, byTag := h.do("GET", "/lot?tag=media&op=securite", nil, nil)
+	if !strings.Contains(byTag, `name="cle_0" value="loki/104"`) || !strings.Contains(byTag, "tag « media »") {
+		t.Error("préparation d'un lot par tag")
+	}
+}
+
+func TestRestartPages(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, Apt: detect.Apt{Present: true}, RestartUnits: []string{"nginx.service"}})
+	_, body := h.do("GET", "/invites/loki/104", nil, nil)
+	if !strings.Contains(body, "Redémarrer les services (1)…") || !strings.Contains(body, "/redemarrage?quoi=ct") {
+		t.Error("carte Redémarrage absente de la fiche")
+	}
+	_, todo := h.do("GET", "/", nil, nil)
+	if !strings.Contains(todo, `value="loki/104:services"`) || !strings.Contains(todo, "Redémarrages") {
+		t.Error("redémarrage absent de « À traiter »")
+	}
+	_, inv := h.do("GET", "/inventaire", nil, nil)
+	if !strings.Contains(inv, "1 service(s) à redémarrer") {
+		t.Error("badge de services absent de l'inventaire")
+	}
+	_, conf := h.do("GET", "/invites/loki/104/redemarrage?quoi=services", nil, nil)
+	if !strings.Contains(conf, "nginx.service") || !strings.Contains(conf, "systemctl restart") {
+		t.Error("page de confirmation des services")
+	}
+	tok := h.csrf()
+	resp, _ := h.do("POST", "/invites/loki/104/redemarrage?quoi=services", url.Values{"csrf": {tok}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "erreur=") || len(h.eng.restarted) != 0 {
+		t.Error("redémarrage sans confirmation accepté")
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/redemarrage?quoi=ct", url.Values{"csrf": {tok}, "confirme": {"1"}}, nil)
+	if !strings.HasPrefix(resp.Header.Get("Location"), "/taches/") || strings.Join(h.eng.restarted, ",") != "ct:loki/104" {
+		t.Errorf("redémarrage du CT : %s %v", resp.Header.Get("Location"), h.eng.restarted)
 	}
 }
 

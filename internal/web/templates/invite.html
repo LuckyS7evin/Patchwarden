@@ -70,6 +70,23 @@
     <p><a class="btn" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/securite">Continuer vers la confirmation…</a></p>
   </section>
   {{end}}{{end}}
+  {{with .Restart}}{{if and (not .Why) .Needed}}
+  <section class="card">
+    <h2>Redémarrage</h2>
+    <p class="small">Des programmes utilisent encore l'ancienne version de bibliothèques mises à jour : le correctif n'est actif qu'après leur redémarrage.</p>
+    <dl class="kv">
+      {{if .Units}}<dt>Services</dt><dd>{{range .Units}}<span class="b w">{{.}}</span>{{end}}</dd>{{end}}
+      {{if .Excluded}}<dt>Services système</dt><dd>{{range .Excluded}}<span class="b">{{.}}</span>{{end}}</dd>{{end}}
+      {{if .Procs}}<dt>Autres processus</dt><dd>{{range .Procs}}<span class="b">{{.}}</span>{{end}}</dd>{{end}}
+      {{if .Required}}<dt>Système</dt><dd><span class="b w">redémarrage requis</span> (fichier reboot-required)</dd>{{end}}
+    </dl>
+    <div class="snapacts spaced">
+      {{if .CanServices}}<a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/redemarrage?quoi=services">Redémarrer les services ({{len .Units}})…</a>{{end}}
+      <a class="btn{{if not .CanServices}} p{{end}}" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/redemarrage?quoi=ct">Redémarrer le CT…</a>
+      {{if .Reboot}}<span class="muted small">{{if .CanServices}}redémarrer les services ne suffit pas : le CT est conseillé{{end}}</span>{{end}}
+    </div>
+  </section>
+  {{end}}{{end}}
   {{if not .Full}}<section class="card"><h2>Mises à jour</h2><p class="muted">{{if .Row.Why}}Indisponibles : {{.Row.Why}}{{else}}Indisponibles pour cet invité.{{end}}</p></section>{{end}}
   {{if gt .Missing 0}}<p class="alert alert-warn">Le script pose des questions sans terminal : <a href="?onglet=questions">enregistrez une réponse pour chacune</a> avant de mettre à jour l'application.</p>{{end}}
   </div>

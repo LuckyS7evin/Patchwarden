@@ -221,7 +221,7 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | :--- | :--- |
 | 4 ✅ | Détection planifiée (1), notifications (2), vue sécurité (3) |
 | 5 ✅ | Snapshots avant mise à jour (exigence initiale), retour arrière en un clic (5) |
-| 6 | Lots, regroupement par tags (6), redémarrages requis (8) |
+| 6 ✅ | Lots, regroupement par tags (6), redémarrages requis (8) |
 | 7 | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
 | 8 | Docker via l'API Portainer |
 | 9 | Vérification après mise à jour (4), fenêtres de maintenance (9), sécurité automatique (10, après les snapshots), métriques Prometheus (11) |
@@ -283,6 +283,19 @@ sinon) plutôt que des encadrés.
 | Étapes d'une tâche | Déduites du journal par des marqueurs (`▶ lxc-apt`, `pw.apt_rc=`…), mêmes règles côté serveur et dans le navigateur |
 | Retours du 16/11 | Sélecteur de thème et compte en bas du panneau de gauche (en haut sur mobile) ; frise des versions qui passe à la ligne (lien changelog toujours visible) ; stockage d'un nœud : celui qui porte les disques des LXC détectés, pas le plus rempli (TYR affichait le disque de données d'OMV à 99 %) |
 | Réglages | Lecture seule ; secrets jamais affichés (jetons : « défini (masqué) » ou nom de la variable ; URL de notification réduite à l'hôte, le sujet ntfy valant secret) |
+
+## Jalon 6 : lots, tags, redémarrages (16/11/2026)
+
+| Sujet | Décision |
+| :--- | :--- |
+| Exécution d'un lot | Une opération à la fois, dans l'ordre affiché (moins de charge sur les nœuds, arrêt au premier échec possible). Lot persisté (`data_dir/lots`), suivi sur `/lots/<id>` ; un lot coupé par un redémarrage de PatchWarden est marqué interrompu, ses opérations restantes annulées |
+| Confirmation | Une case pour tout le lot ; snapshot choisi invité par invité (pré-coché comme sur la page d'une mise à jour) ; simulation du lot sans confirmation (les redémarrages, sans simulation, y sont ignorés) |
+| Exclusions | Invités à confirmation renforcée (nom à saisir) jamais en lot ; invité de PatchWarden exclu ; une mise à jour et des redémarrages par invité au plus (« tout » l'emporte sur « sécurité ») |
+| Notifications | Un seul message par lot réel (réussites, échecs, annulations) ; ses tâches ne notifient pas une à une |
+| Tags | Inventaire groupé par tag (un invité multi-tags apparaît dans chaque groupe ; le tag community-scripts est ignoré) avec « préparer un lot : sécurité / tout » ; filtre par tag dans « À traiter » |
+| Anciennes bibliothèques | Détection : processus dont `/proc/<pid>/maps` contient une bibliothèque `.so … (deleted)`, rattachés à leur service par `/proc/<pid>/cgroup`. Sans dépendance (needrestart non requis) |
+| Redémarrer les services | Liste refaite dans le CT au moment de l'action (PatchWarden n'envoie aucun nom) ; dbus, `systemd-*`, `user@`, consoles exclus : pour eux, redémarrage du CT conseillé |
+| Redémarrer le CT | `pct reboot` (arrêt propre), attente du redémarrage, détection ; nom à saisir pour un invité critique |
 
 ## Questions encore ouvertes
 

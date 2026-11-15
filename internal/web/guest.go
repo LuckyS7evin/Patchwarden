@@ -36,6 +36,8 @@ type guestData struct {
 	SnapWhy      string // retour arrière / suppression impossibles : pourquoi
 	// Preview : rendu dans le tiroir de l'inventaire.
 	TopSec []detect.Package
+	// Restart : redémarrages utiles (services, CT).
+	Restart *engine.RestartPlan
 }
 
 var guestTabs = []struct{ key, label string }{
@@ -80,6 +82,8 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 		d.StrictMissing = det.Apt.SecurityNotStrict()
 		d.TopSec = d.SecurityPkgs[:min(5, len(d.SecurityPkgs))]
 	}
+	rp := s.deps.Engine.PlanRestart(g)
+	d.Restart = &rp
 	d.SnapPref = s.deps.Engine.SnapPref(g.Key())
 	d.SnapDefaults = s.deps.Engine.SnapDefaults()
 	if err := s.deps.Engine.CanSnapAction(g); err != nil {

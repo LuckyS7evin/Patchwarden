@@ -1,0 +1,42 @@
+{{define "content"}}
+<div class="content">
+{{with .Batch}}
+  <p class="crumbs"><a href="/taches">Tâches</a> › {{.ID}}</p>
+  <div class="pagehead">
+    <div>
+      <h1>{{if .DryRun}}Lot simulé{{else}}Lot{{end}} · {{len .Items}} opération(s)</h1>
+      <p class="sub">demandé par {{.By}} le {{date .CreatedAt}} · une opération à la fois{{if .StopOnFail}} · arrêt au premier échec{{end}}{{if not .EndedAt.IsZero}} · terminé à {{clock .EndedAt}}{{end}}</p>
+    </div>
+    <span class="sp"></span>
+    <span class="b {{if eq .Status "terminé"}}{{if .Count "échouée"}}w{{else}}ok{{end}}{{else if eq .Status "en cours"}}a{{else}}c{{end}}" id="statut">{{.Status}}</span>
+  </div>
+  <div class="sum">
+    <div><b>{{.Count "réussie"}}</b>réussie(s)</div>
+    <div><b{{if .Count "échouée"}} class="c"{{end}}>{{.Count "échouée"}}</b>échouée(s)</div>
+    <div><b>{{.Count "en cours"}}</b>en cours</div>
+    <div><b>{{.Count "en attente"}}</b>en attente</div>
+    <div><b>{{.Count "annulée"}}</b>annulée(s)</div>
+    <div><b>{{.Count "ignorée"}}</b>ignorée(s)</div>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>#</th><th>Invité</th><th>Opération</th><th>État</th><th>Résultat</th></tr></thead>
+    <tbody>
+    {{range $i, $it := .Items}}
+    <tr>
+      <td class="num">{{inc $i}}</td>
+      <td class="nowrap"><a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a> <span class="id">{{.Node}}/{{.VMID}}</span></td>
+      <td class="nowrap">{{.Op.Label}}{{if .Snapshot}} <span class="b v">snapshot</span>{{end}}</td>
+      <td class="nowrap"><span class="b {{itemClass .Status}}">{{.Status}}</span>{{if .JobID}} <a href="/taches/{{.JobID}}">journal</a>{{end}}</td>
+      <td class="small">{{if .Error}}<span class="crit">{{.Error}}</span>{{else}}{{.Summary}}{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  {{if .Running}}<p class="muted small">La page se met à jour toute seule pendant le lot. Fermer la page n'arrête pas le lot.</p>{{end}}
+{{end}}
+</div>
+{{end}}
+
+{{define "head"}}{{if .Live}}<meta http-equiv="refresh" content="4">{{end}}{{end}}

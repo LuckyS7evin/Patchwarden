@@ -42,6 +42,8 @@ type Engine struct {
 	// Snap : section [snapshots] ; SnapPrefs : réglage propre à chaque invité.
 	Snap      SnapConfig
 	SnapPrefs *PrefStore
+	// Batches : lots d'opérations (facultatif).
+	Batches *BatchStore
 }
 
 // Erreurs de refus, affichées telles quelles dans l'interface.
@@ -59,7 +61,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 6
+const WrapperVersion = 7
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {
@@ -311,6 +313,9 @@ func summarize(r detect.Result) string {
 	}
 	if r.RebootRequired {
 		parts = append(parts, "redémarrage requis")
+	}
+	if n := len(r.RestartUnits); n > 0 {
+		parts = append(parts, plural(n, "service lié à d'anciennes bibliothèques", "services liés à d'anciennes bibliothèques"))
 	}
 	if len(parts) == 0 {
 		return "rien à signaler"

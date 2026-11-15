@@ -47,6 +47,10 @@ const (
 	KindRollback Kind = "retour arrière"
 	// KindSnapDelete : suppression d'un snapshot PatchWarden.
 	KindSnapDelete Kind = "suppression de snapshot"
+	// KindServices : redémarrage des services liés à des bibliothèques remplacées.
+	KindServices Kind = "redémarrage des services"
+	// KindReboot : redémarrage du CT.
+	KindReboot Kind = "redémarrage du CT"
 )
 
 // Target est l'invité visé.

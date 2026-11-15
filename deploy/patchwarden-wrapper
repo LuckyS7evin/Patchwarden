@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 6) :
+# Verbes (version 7) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -34,6 +34,11 @@
 #   lxc-snapdel <vmid> <nom>               suppression d'un snapshot PatchWarden
 #   lxc-rollback <vmid> <nom>              retour à un snapshot PatchWarden ; le CT est
 #                                          redémarré ensuite s'il tournait avant
+#   lxc-restart-services <vmid>            redémarre les services systemd encore liés à des
+#                                          bibliothèques remplacées (liste établie dans le CT,
+#                                          jamais transmise par PatchWarden ; services système
+#                                          exclus)
+#   lxc-reboot <vmid>                      redémarre le CT (pct reboot)
 #
 # Snapshots : seuls ceux dont le nom suit pw-AAAAMMJJ-HHMM-(complet|securite)
 # sont acceptés. Les snapshots créés à la main ne sont jamais touchés.
@@ -42,13 +47,14 @@
 # 40 snapshot impossible sur ce stockage, 41 stockage trop rempli (ou remplissage
 # inconnu), 42 snapshot déjà existant, 43 échec de pct snapshot, 44 snapshot
 # introuvable, 45 échec de pct delsnapshot / rollback, 46 CT non redémarré,
+# 50 échec du redémarrage d'un service, 51 systemd absent, 52 échec de pct reboot,
 # autre : code renvoyé par la commande exécutée dans l'invité.
 # ==============================================================================
 
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=6
+WRAPPER_VERSION=7
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -132,6 +138,58 @@ pw_security_sources() {
 SECSRC_EOF
 
 # ------------------------------------------------------------------------------
+# Processus encore liés à une bibliothèque remplacée par une mise à jour (fichier
+# .so supprimé mais toujours en mémoire) : ils exécutent l'ancien code tant
+# qu'ils ne sont pas redémarrés. Affiche « unité|commande » (unité vide hors
+# service systemd). Fonction commune à la détection et à lxc-restart-services.
+# ------------------------------------------------------------------------------
+read -r -d '' RESTARTSCAN <<'RESTARTSCAN_EOF'
+pw_stale_procs() {
+	PROCDIR=/proc
+	for d in "$PROCDIR"/[0-9]*; do
+		[ -r "$d/maps" ] || continue
+		grep -qE '\.so[.0-9]* \(deleted\)$' "$d/maps" </dev/null 2>/dev/null || continue
+		unit="$(sed -n 's#.*/\([^/]*\.service\)$#\1#p' "$d/cgroup" </dev/null 2>/dev/null | head -n 1)"
+		comm="$(head -c 64 "$d/comm" 2>/dev/null | tr -cd 'A-Za-z0-9._@:+-')"
+		printf '%s|%s\n' "$unit" "${comm:-?}"
+	done | sort -u
+}
+RESTARTSCAN_EOF
+
+# Redémarrage des services trouvés par pw_stale_procs, exécuté DANS le LXC.
+read -r -d '' RESTARTSVC <<'RESTARTSVC_EOF'
+export LC_ALL=C
+if ! command -v systemctl >/dev/null 2>&1; then
+	echo "PW-ERREUR: systemd absent de ce CT : redémarrez le CT"
+	exit 51
+fi
+units="$(pw_stale_procs | cut -d'|' -f1 | grep -E '^[A-Za-z0-9@._:-]+\.service$' | sort -u)"
+rc=0
+n=0
+[ -n "$units" ] || echo "PW: aucun service à redémarrer"
+for u in $units; do
+	case "$u" in
+	dbus.service | dbus-broker.service | systemd-* | user@* | getty@* | console-getty.service | container-getty@* | serial-getty@*)
+		echo "PW: $u non redémarré (service système : redémarrez le CT)"
+		continue
+		;;
+	esac
+	if systemctl restart -- "$u" </dev/null; then
+		echo "PW: $u redémarré"
+		n=$((n + 1))
+	else
+		echo "PW-ERREUR: échec du redémarrage de $u"
+		rc=50
+	fi
+done
+echo "pw.restarted=$n"
+pw_stale_procs | while IFS='|' read -r unit comm; do
+	if [ -n "$unit" ]; then echo "PW: encore à redémarrer : $unit"; else echo "PW: encore lié aux anciennes bibliothèques : $comm (redémarrage du CT)"; fi
+done
+exit "$rc"
+RESTARTSVC_EOF
+
+# ------------------------------------------------------------------------------
 # Script de détection exécuté DANS le LXC (POSIX sh, sortie clé=valeur).
 # Lecture seule, sauf `apt-get update` si demandé (rafraîchit l'index apt).
 # ------------------------------------------------------------------------------
@@ -150,6 +208,9 @@ kv sys.nproc "$(nproc 2>/dev/null || echo 0)"
 kv sys.mem_mb "$(awk '/^MemTotal:/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null)"
 kv sys.root_used_pct "$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
 if [ -e /var/run/reboot-required ]; then kv sys.reboot_required 1; else kv sys.reboot_required 0; fi
+pw_stale_procs | while IFS='|' read -r unit comm; do
+	if [ -n "$unit" ]; then kv restart.unit "$unit"; else kv restart.proc "$comm"; fi
+done | sort -u
 
 if [ -f /usr/bin/update ]; then
 	name="$(sed -n 's/^export UPDATE_SCRIPT_NAME="\{0,1\}\([A-Za-z0-9._-]*\).*/\1/p' /usr/bin/update | head -n 1)"
@@ -617,6 +678,29 @@ run_rollback() {
 	snap_info
 }
 
+run_restart_services() {
+	log "lxc-restart-services ${VMID}"
+	timeout 900 pct exec "$VMID" -- sh -s <<<"${RESTARTSCAN}
+${RESTARTSVC}"
+}
+
+run_reboot() {
+	local st i
+	log "lxc-reboot ${VMID}"
+	echo "PW: redémarrage du CT ${VMID} (pct reboot)"
+	if ! timeout 300 pct reboot "$VMID" --timeout 120 </dev/null; then
+		echo "PW-ERREUR: pct reboot a échoué"
+		exit 52
+	fi
+	for ((i = 0; i < 60; i++)); do
+		st="$(pct status "$VMID" 2>/dev/null)"
+		[[ "$st" == "status: running" ]] && break
+		sleep "$RES_POLL"
+	done
+	echo "PW: état après : ${st#status: }"
+	[[ "$st" == "status: running" ]] || exit 52
+}
+
 case "$VERB" in
 ping)
 	[[ ${#ARGS[@]} -eq 1 ]] || refuse "ping ne prend pas d'argument"
@@ -631,6 +715,7 @@ lxc-detect)
 	check_ct "$VMID"
 	log "lxc-detect ${VMID} refresh=${ARGS[2]}"
 	timeout "$TIMEOUT_DETECT" pct exec "$VMID" -- sh -s -- "${ARGS[2]}" <<<"${SECSRC}
+${RESTARTSCAN}
 ${DETECT}"
 	rc=$?
 	snap_info
@@ -695,6 +780,18 @@ lxc-rollback)
 	VMID="${ARGS[1]}" SNAP="${ARGS[2]}"
 	check_ct_exists "$VMID"
 	run_detached rollback run_rollback
+	;;
+lxc-restart-services)
+	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : lxc-restart-services <vmid>"
+	VMID="${ARGS[1]}"
+	check_ct "$VMID"
+	run_detached services run_restart_services
+	;;
+lxc-reboot)
+	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : lxc-reboot <vmid>"
+	VMID="${ARGS[1]}"
+	check_ct "$VMID"
+	run_detached reboot run_reboot
 	;;
 *)
 	refuse "verbe inconnu : ${VERB}"

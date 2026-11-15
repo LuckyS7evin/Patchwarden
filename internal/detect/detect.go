@@ -121,6 +121,10 @@ type Result struct {
 	Containers     int       `json:"containers"`
 	Apps           []App     `json:"apps,omitempty"`
 	Snap           SnapInfo  `json:"snap"`
+	// RestartUnits : services systemd encore liés à des bibliothèques
+	// remplacées ; RestartProcs : autres processus dans ce cas (hors service).
+	RestartUnits []string `json:"restart_units,omitempty"`
+	RestartProcs []string `json:"restart_procs,omitempty"`
 }
 
 // AppUpdates compte les applis avec une version plus récente.
@@ -201,6 +205,10 @@ func Parse(lines []string) (Result, error) {
 			r.Apt.StrictPackages = append(r.Apt.StrictPackages, v)
 		case "apt.security_strict":
 			r.Apt.SecurityStrict = atoi(v)
+		case "restart.unit":
+			r.RestartUnits = append(r.RestartUnits, v)
+		case "restart.proc":
+			r.RestartProcs = append(r.RestartProcs, v)
 		case "docker.present":
 			r.Docker = v == "1"
 		case "docker.containers":
@@ -448,3 +456,46 @@ func (r Result) NewSince(t time.Time) (security []Package, apps []App) {
 	}
 	return security, apps
 }
+
+// systemUnit : service que PatchWarden ne redémarre pas seul (le wrapper les
+// exclut aussi) : il faut redémarrer le CT.
+func systemUnit(u string) bool {
+	switch {
+	case u == "dbus.service" || u == "dbus-broker.service" || u == "console-getty.service":
+		return true
+	}
+	for _, p := range []string{"systemd-", "user@", "getty@", "container-getty@", "serial-getty@"} {
+		if strings.HasPrefix(u, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// RestartableUnits : services que « Redémarrer les services » relancera.
+func (r Result) RestartableUnits() []string {
+	var out []string
+	for _, u := range r.RestartUnits {
+		if !systemUnit(u) {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// RebootAdvised : seul un redémarrage du CT remet tout à neuf (fichier
+// reboot-required, service système ou processus hors service concerné).
+func (r Result) RebootAdvised() bool {
+	if r.RebootRequired || len(r.RestartProcs) > 0 {
+		return true
+	}
+	for _, u := range r.RestartUnits {
+		if systemUnit(u) {
+			return true
+		}
+	}
+	return false
+}
+
+// RestartNeeded : un redémarrage (services ou CT) est utile.
+func (r Result) RestartNeeded() bool { return r.RebootAdvised() || len(r.RestartUnits) > 0 }

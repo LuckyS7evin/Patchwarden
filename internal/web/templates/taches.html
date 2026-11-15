@@ -10,6 +10,26 @@
   </div>
   {{if .Started}}<p class="alert alert-info">{{.Started}} détection(s) lancée(s){{if ne .Skipped "0"}}, {{.Skipped}} invité(s) ignoré(s) (arrêtés, VM, modèles, nœud sans SSH ou tâche déjà en cours){{end}}.</p>{{end}}
   {{if .Simulations}}<p class="alert alert-info">{{.Simulations}} simulation(s) lancée(s){{if ne .Skipped "0"}}, {{.Skipped}} ignorée(s) (plan impossible ou tâche déjà en cours){{end}}. Rien n'est modifié.</p>{{end}}
+  {{if .Batches}}
+  <h2>Lots récents</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Date</th><th>Lot</th><th>État</th><th>Opérations</th><th>Par</th></tr></thead>
+    <tbody>
+    {{range .Batches}}
+    <tr>
+      <td class="nowrap"><a href="/lots/{{.ID}}">{{date .CreatedAt}}</a></td>
+      <td>{{len .Items}} opération(s){{if .DryRun}} <span class="b">simulation</span>{{end}}</td>
+      <td><span class="b {{if eq .Status "en cours"}}a{{else if eq .Status "terminé"}}{{if .Count "échouée"}}w{{else}}ok{{end}}{{else}}c{{end}}">{{.Status}}</span></td>
+      <td class="small">{{.Count "réussie"}} réussie(s) · {{.Count "échouée"}} échouée(s){{with .Count "annulée"}} · {{.}} annulée(s){{end}}{{with .Count "ignorée"}} · {{.}} ignorée(s){{end}}</td>
+      <td class="muted">{{.By}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  <h2 class="spaced">Tâches</h2>
+  {{end}}
   {{if .Jobs}}
   <div class="tablewrap">
   <table>

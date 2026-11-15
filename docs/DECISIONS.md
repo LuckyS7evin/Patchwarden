@@ -180,8 +180,10 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 - apt : 55 paquets, code 0.
 - `update` community-scripts : ressources augmentées par le wrapper puis restaurées ;
   réponse enregistrée « oui » à « Update Nginx configuration? » (nginx.conf remplacé,
-  ancien fichier sauvegardé par le script) ; sauvegarde du script dans `/opt/termix.backup`
-  (disque de 33 % à 43 %).
+  ancien fichier sauvegardé par le script). Disque de 33 % à 43 %. Correction : ce n'est pas
+  `/opt/termix.backup` (`create_backup` n'y copie que `/opt/termix/.env`, et
+  `restore_backup` supprime le dossier à la fin, voir `core/lib/system.func`), mais la
+  compilation (cache npm, `node_modules`, fichiers construits).
 - Le script ne saute pas directement à la dernière version : il migre par étapes
   (`release-2.6.1-tag` → `release-2.9.2-tag`) et termine par « Run update again ».
   La détection de fin montre donc encore v26.11.1 disponible. Décision : PatchWarden ne
@@ -198,6 +200,10 @@ l'entrée standard ; sans la correction, 7 tests échouent.
   depuis le CT atteignent les valeurs demandées ; sinon, code 32, update non lancé,
   ressources restaurées. Test : le faux `pct` n'applique les CPU qu'après quelques lectures ;
   sans l'attente, le test reproduit le code 113.
+- Troisième passage, wrapper v4 (15/11/2026) : CPU vus dans le CT après 4 s, update réussi
+  en 2 min 30, Termix en v26.11.1, à jour. Disque à 37 %. Effet inverse constaté : la
+  détection lancée 1 s après la restauration voit encore 4 CPU (même délai de pvestatd) ;
+  sans conséquence, à traiter avec le jalon 5 (attendre aussi la restauration).
 
 ## Retours sur l'interface (15/11/2026)
 

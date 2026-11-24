@@ -340,8 +340,11 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
   .search { flex: 1 1 160px; }
   .top .sp { display: none; }
   .content { padding: 16px 16px 90px; }
-  .it { grid-template-columns: 18px 28px 1fr auto; }
-  .it .what, .it .age, .it .chev { display: none; }
+  /* Le détail passe sous le nom : sans lui, les lignes d'un même invité se ressemblent. */
+  .it { grid-template-columns: 18px 28px 1fr auto; row-gap: 4px; }
+  .it .what { grid-column: 3 / -1; grid-row: 2; white-space: normal; overflow-wrap: anywhere; font-size: 13px; color: var(--mut); }
+  .it .what:empty { display: none; }
+  .it .age, .it .chev { display: none; }
   .ph { flex-direction: column; align-items: flex-start; }
   .ph .phm { flex: none; width: 100%; }
   .ph .acts { width: 100%; margin-left: 0; }

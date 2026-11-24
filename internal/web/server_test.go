@@ -1071,3 +1071,24 @@ func TestDockerSteps(t *testing.T) {
 		}
 	}
 }
+
+func TestNewerTagsOneLinePerGuest(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	r := dockerResult(h.now.Add(-time.Hour))
+	for i := range r.DockerInfo.List {
+		r.DockerInfo.List[i].NewTag = "v9.9.9"
+	}
+	_ = h.store.Put("loki/104", r)
+	_, todo := h.do("GET", "/", nil, nil)
+	if n := strings.Count(todo, ">autre tag<"); n != 1 || !strings.Contains(todo, "4 conteneurs : version plus récente sous un autre tag (mealie, beszel, portainer…)") {
+		t.Errorf("autre tag : %d ligne(s)", n)
+	}
+	if !strings.Contains(todo, "<b>1</b>nouvelles versions") {
+		t.Error("compteur : un invité, pas un conteneur")
+	}
+	resp, logo := h.do("GET", "/static/logo.svg", nil, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Content-Type"), "svg") || !strings.Contains(logo, "PatchWarden") {
+		t.Errorf("logo : %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}

@@ -159,13 +159,9 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 		if dockerTodo(&dock, g, det, icon, sel(engine.OpDocker)) {
 			pending = true
 		}
-		for _, c := range det.DockerInfo.List {
-			if c.NewTag == "" {
-				continue
-			}
+		if it, ok := newerTagsItem(g, det, icon); ok {
 			t.Versions++
-			a := detect.App{Name: c.Name, Installed: c.Tag(), Latest: c.NewTag, ChangelogURL: c.ChangelogURL}
-			dock.Items = append(dock.Items, todoItem{Guest: g, Icon: icon, App: &a, Tag: "autre tag", TagClass: "v", Link: guestLink(g, "docker")})
+			dock.Items = append(dock.Items, it)
 		}
 		for _, w := range det.DockerInfo.Watchtower {
 			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: "Watchtower démarré : il met les images à jour en parallèle, arrêtez-le", Code: w, Tag: "Watchtower", TagClass: "w", Link: guestLink(g, "docker")})
@@ -266,6 +262,37 @@ func dockerTodo(grp *todoGroup, g inventory.Guest, det detect.Result, icon, sel 
 			Tag: plural(n, "image", "images"), TagClass: "w", Since: since, Link: guestLink(g, "docker")})
 	}
 	return found
+}
+
+// newerTagsItem résume, en une ligne par invité, les conteneurs dont une
+// version plus récente est publiée sous un autre tag (information : le tag se
+// change à la main). Le détail est dans l'onglet Docker.
+func newerTagsItem(g inventory.Guest, det detect.Result, icon string) (todoItem, bool) {
+	var cs []detect.Container
+	for _, c := range det.DockerInfo.List {
+		if c.NewTag != "" {
+			cs = append(cs, c)
+		}
+	}
+	it := todoItem{Guest: g, Icon: icon, Tag: "autre tag", TagClass: "v", Link: guestLink(g, "docker")}
+	switch len(cs) {
+	case 0:
+		return it, false
+	case 1:
+		c := cs[0]
+		it.App = &detect.App{Name: c.Name, Installed: c.Tag(), Latest: c.NewTag, ChangelogURL: c.ChangelogURL}
+		return it, true
+	}
+	names := make([]string, 0, 3)
+	for _, c := range cs[:min(3, len(cs))] {
+		names = append(names, c.Name)
+	}
+	it.Text = fmt.Sprintf("%d conteneurs : version plus récente sous un autre tag (%s", len(cs), strings.Join(names, ", "))
+	if len(cs) > 3 {
+		it.Text += "…"
+	}
+	it.Text += ")"
+	return it, true
 }
 
 func plural(n int, one, many string) string {

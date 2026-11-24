@@ -343,6 +343,9 @@ verrait alors tout « à jour ».
 
 ### Mettre à jour PatchWarden
 
+Aide-mémoire complet (PatchWarden, wrapper, vérification, problèmes courants) :
+[docs/MISE-A-JOUR.md](docs/MISE-A-JOUR.md).
+
 Dans le LXC où le dépôt est cloné et compilé :
 
 ```bash

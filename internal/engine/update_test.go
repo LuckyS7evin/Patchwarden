@@ -264,3 +264,16 @@ func TestExplainAptFetchError(t *testing.T) {
 		t.Errorf("explication : %v", err)
 	}
 }
+
+func TestExplainApt404AfterUpdate(t *testing.T) {
+	out := []string{
+		"PW: apt-get update",
+		"Err:1 http://security.debian.org/debian-security bullseye-security/main amd64 dpkg amd64 1.20.14",
+		"  404  Not Found [IP: 199.232.170.132 80]",
+		"E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?",
+	}
+	err := explainApt(100, nil, out)
+	if err == nil || !strings.Contains(err.Error(), "(404  Not Found [IP: 199.232.170.132 80])") || !strings.Contains(err.Error(), "archive.debian.org") {
+		t.Errorf("explication : %v", err)
+	}
+}

@@ -486,8 +486,10 @@ func explainApt(code int, errs, out []string) error {
 		}
 		if firstMatching(out, "apt-get update a signalé des erreurs") != "" {
 			msg += " · apt-get update avait déjà échoué juste avant (dépôt injoignable, déplacé ou archivé ?) : lancez « apt-get update » dans l'invité et lisez ses lignes Err: / W:"
+		} else if strings.Contains(msg, "Unable to fetch") && strings.Contains(msg, "404") {
+			msg += " · le dépôt annonce des paquets qu'il ne fournit plus, juste après apt-get update : dépôt en cours d'archivage ou miroir incohérent. Réessayez plus tard ; pour un système sans support (Debian 11…), passez à la version suivante ou utilisez archive.debian.org"
 		} else if strings.Contains(msg, "Unable to fetch") {
-			msg += " · des paquets ont disparu du dépôt depuis le dernier apt-get update : relancez la mise à jour ; si l'erreur revient, lancez « apt-get update » dans l'invité et lisez ses erreurs"
+			msg += " · téléchargement impossible : relancez la mise à jour ; si l'erreur revient, lancez « apt-get update » dans l'invité et lisez ses erreurs"
 		}
 		return errors.New(msg)
 	}

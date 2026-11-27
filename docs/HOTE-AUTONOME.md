@@ -30,14 +30,38 @@ l'inventaire signalent aussi un nœud Proxmox déclaré par erreur en `[[host]]`
 
 ## 1. Sur le VPS, en root
 
-Copier le wrapper depuis le CT 103 (à lancer dans le CT 103, avec votre compte habituel
-sur le VPS) :
+### Copier le wrapper sur le VPS
 
-```bash
-scp -P 2222 /root/Patchwarden/deploy/patchwarden-wrapper <vous>@<vps>:/tmp/
-```
+Le CT 103 n'a pas votre clé personnelle du VPS (et ne doit pas l'avoir) : le fichier passe
+par **votre PC**, celui qui se connecte déjà au VPS.
 
-Puis, sur le VPS (`sudo -i`) :
+1. Récupérer le wrapper sur le PC, au choix :
+   - GitHub (connecté) : `deploy/patchwarden-wrapper` sur la branche `main` → bouton
+     « Download raw file » ;
+   - ou depuis le CT 103, si le PC s'y connecte en SSH :
+     `scp root@192.168.0.19:/root/Patchwarden/deploy/patchwarden-wrapper .`
+2. L'envoyer sur le VPS avec votre clé, depuis le dossier où il se trouve (Linux, macOS, ou
+   PowerShell sous Windows) :
+
+   ```bash
+   scp -P 2222 -i ~/.ssh/<votre_clé_vps> patchwarden-wrapper <vous>@<vps>:/tmp/
+   ```
+
+   (Sous Windows, `~` fonctionne aussi dans PowerShell ; sinon `$env:USERPROFILE\.ssh\…`.)
+3. Vérifier que le fichier est intact : la même empreinte dans le CT 103 et sur le VPS.
+
+   ```bash
+   sha256sum /root/Patchwarden/deploy/patchwarden-wrapper    # CT 103
+   sha256sum /tmp/patchwarden-wrapper                         # VPS
+   ```
+
+   Une empreinte différente vient en général d'un fichier ouvert puis enregistré sous
+   Windows (fins de ligne changées) : retéléchargez-le sans l'ouvrir.
+
+Sans `scp` possible depuis le PC : sur le VPS, `cat > /tmp/patchwarden-wrapper`, coller tout
+le contenu du fichier, puis Entrée et Ctrl+D ; vérifiez ensuite l'empreinte (étape 3).
+
+### Installer, sur le VPS (`sudo -i`)
 
 ```bash
 apt install sudo                                      # souvent déjà présent
@@ -71,7 +95,8 @@ partie publique, dans le CT 103 :
 cat /etc/patchwarden/id_ed25519.pub
 ```
 
-Sur le VPS, en root, avec votre IP publique dans `from=` et la clé affichée :
+Copiez cette ligne (copier-coller dans le terminal suffit, il n'y a pas de fichier à
+transférer). Sur le VPS, en root, avec votre IP publique dans `from=` et la clé affichée :
 
 ```bash
 install -d -m 700 -o patchwarden -g patchwarden /home/patchwarden/.ssh
@@ -139,12 +164,15 @@ snapshot. La simulation reste disponible.
 
 À refaire à chaque nouvelle version du wrapper (`check-config` le signale), en plus des nœuds :
 
-```bash
-# Dans le CT 103
-scp -P 2222 /root/Patchwarden/deploy/patchwarden-wrapper <vous>@<vps>:/tmp/
-# Sur le VPS, en root
-install -m 755 -o root -g root /tmp/patchwarden-wrapper /usr/local/sbin/patchwarden-wrapper
-```
+1. Copier le nouveau fichier sur le VPS en passant par le PC (partie 1, « Copier le wrapper
+   sur le VPS »), et vérifier l'empreinte.
+2. Sur le VPS, en root :
+
+   ```bash
+   install -m 755 -o root -g root /tmp/patchwarden-wrapper /usr/local/sbin/patchwarden-wrapper
+   ```
+
+3. Dans le CT 103 : `patchwarden check-config` (version attendue sur `vps`).
 
 ## En cas de problème
 

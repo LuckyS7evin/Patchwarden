@@ -63,6 +63,9 @@ le contenu du fichier, puis Entrée et Ctrl+D ; vérifiez ensuite l'empreinte (�
 
 ### Installer, sur le VPS (`sudo -i`)
 
+Ouvrez d'abord un **shell root** (`sudo -i`) et restez-y jusqu'à la fin de la partie 2. Avec
+`sudo cat > fichier`, c'est votre compte, pas root, qui écrit le fichier : « Permission denied ».
+
 ```bash
 apt install sudo                                      # souvent déjà présent
 

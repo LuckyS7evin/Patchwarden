@@ -1,12 +1,12 @@
 {{define "content"}}
 <div class="content">
 {{with .Row}}
-<p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/inventaire?noeud={{.Node}}">{{.Node}}</a> › {{.Name}}</p>
+<p class="crumbs"><a href="/inventaire">Inventaire</a> › {{if .IsHost}}<a href="/inventaire?type=host">Hôtes autonomes</a>{{else}}<a href="/inventaire?noeud={{.Node}}">{{.Node}}</a>{{end}} › {{.Name}}</p>
 <section class="ph">
   <img class="ic lg" src="{{.Icon}}" alt="" width="60" height="60">
   <div class="phm">
     <h1>{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</h1>
-    <div class="sub">{{.TypeLabel}} {{.VMID}} · {{.Node}}{{with .Det}} · {{.OSPretty}} · {{.Nproc}} CPU · {{.MemMB}} Mo{{end}} · {{template "statut" .}}
+    <div class="sub">{{.Where}}{{with .Det}} · {{.OSPretty}} · {{.Nproc}} CPU · {{.MemMB}} Mo{{end}} · {{template "statut" .}}
       {{- if .CommunityScript}} <span class="b a">community-scripts</span>{{end}}
       {{- if .Critical}} <span class="b c" title="{{.CriticalReason}}">confirmation renforcée</span>{{end}}
       {{- with .Det}}{{if .SpecialLabel}} <span class="b a">{{.SpecialLabel}} {{.SpecialVersion}}</span>{{end}}{{end}}
@@ -153,7 +153,7 @@
       {{if gt (len .Jobs) 5}}<a href="?onglet=historique">Tout l'historique →</a>{{end}}
       {{else}}<p class="muted">Aucune tâche.</p>{{end}}
     </section>
-    {{if or (eq .Row.Type "lxc") (eq .Row.Type "qemu")}}
+    {{if .Row.Managed}}
     <section class="card">
       <h2>Vérification après une opération</h2>
       <p class="small">Après chaque mise à jour ou redémarrage réel, PatchWarden compare l'invité à son état d'avant : services systemd en échec, conteneurs arrêtés ou en mauvaise santé. En cas de problème, la tâche échoue et le retour arrière est proposé (jamais lancé seul).</p>

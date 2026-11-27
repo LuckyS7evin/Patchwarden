@@ -56,7 +56,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	guests := append(snap.Guests[:0:0], snap.Guests...)
 	sort.Slice(guests, func(i, j int) bool { return guests[i].Key() < guests[j].Key() })
 	for _, g := range guests {
-		if g.Template || (g.Type != "lxc" && g.Type != "qemu") {
+		if g.Template || !g.Managed() {
 			continue
 		}
 		l := fmt.Sprintf(`{node=%q,vmid="%d",name=%q,type=%q}`, esc(g.Node), g.VMID, esc(g.Name), esc(g.Type))

@@ -75,6 +75,17 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, se *sessio
 		nodes = append([]setting{{"ssh.user", c.SSH.User, "clé dédiée, commande forcée (wrapper)"}}, nodes...)
 	}
 	add("Accès aux nœuds", nodes...)
+	if len(c.Hosts) > 0 {
+		var hosts []setting
+		for _, h := range c.Hosts {
+			note := "compte dédié, sudo limité au wrapper ; pas de snapshot, confirmation renforcée"
+			if len(h.Tags) > 0 {
+				note += " · tags : " + strings.Join(h.Tags, ", ")
+			}
+			hosts = append(hosts, setting{"[[host]] " + h.Name, h.User + "@" + h.Address, note})
+		}
+		add("Hôtes autonomes", hosts...)
+	}
 	keep, maxPct := c.Snapshots.Keep, c.Snapshots.MaxStoragePct
 	add("Snapshots",
 		setting{"snapshots.default", yes(c.Snapshots.Default), "case cochée d'office pour tous les invités"},

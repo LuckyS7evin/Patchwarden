@@ -222,6 +222,8 @@ type env struct {
 	base   string // base des scripts servie par le faux site
 	web    *httptest.Server
 	root   string
+	// hostSrv : serveur de l'hôte autonome (setupHost).
+	hostSrv *sshtest.Server
 }
 
 func setup(t *testing.T) *env {

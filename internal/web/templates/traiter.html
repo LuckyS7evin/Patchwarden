@@ -28,7 +28,7 @@
     <div class="it">
       {{if .Sel}}<input type="checkbox" name="sel" value="{{.Sel}}" aria-label="Sélectionner {{.Guest.Name}}">{{else}}<span></span>{{end}}
       <img class="ic" src="{{.Icon}}" alt="" width="28" height="28" loading="lazy">
-      <div class="nm"><a href="{{.Link}}">{{.Guest.Name}}</a><span>{{.Guest.TypeLabel}} {{.Guest.VMID}} · {{.Guest.Node}}</span></div>
+      <div class="nm"><a href="{{.Link}}">{{.Guest.Name}}</a><span>{{.Guest.Where}}</span></div>
       <div class="what">{{if .Pkgs}}{{range .Pkgs}}<span class="m">{{.}}</span> {{end}}{{if gt .More 0}}+{{.More}}{{end}}
         {{- else if .App}}{{.App.Name}} <span class="m">{{if .App.Installed}}{{.App.Installed}}{{else}}?{{end}}</span> → <span class="m">{{.App.Latest}}</span>{{if .App.ChangelogURL}} · <a href="{{.App.ChangelogURL}}" target="_blank" rel="noopener noreferrer">changelog</a>{{end}}
         {{- else}}{{.Text}}{{with .Code}} <span class="m">{{.}}</span>{{end}}{{end}}</div>

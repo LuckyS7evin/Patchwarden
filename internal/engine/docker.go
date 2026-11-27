@@ -486,7 +486,7 @@ func (e *Engine) PlanDocker(g inventory.Guest, keys []string) DockerPlan {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("disque / plein à %d %% : le téléchargement des images peut échouer faute de place", det.RootUsedPct))
 	}
 	if g.Critical {
-		p.Warnings = append(p.Warnings, "invité critique ("+g.CriticalReason+") : saisissez son nom pour confirmer")
+		p.Warnings = append(p.Warnings, criticalWarning(g))
 	}
 	if w := e.outsideWindow(g); w != "" {
 		p.Warnings = append(p.Warnings, w)
@@ -620,8 +620,11 @@ func groupNames(gs []detect.DockerGroup) string {
 }
 
 func guestNoun(g inventory.Guest) string {
-	if g.Type == "qemu" {
+	switch g.Type {
+	case "qemu":
 		return "VM"
+	case inventory.TypeHost:
+		return "hôte"
 	}
 	return "CT"
 }

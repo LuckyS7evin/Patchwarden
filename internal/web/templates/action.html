@@ -4,11 +4,11 @@
 <p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}">{{.Guest.Name}}</a></p>
 <div class="pagehead">
   <div>
-    <h1>{{.Action.Label}} · {{.Guest.Name}} <span class="muted">· {{.Guest.TypeLabel}} {{.Guest.VMID}} sur {{.Guest.Node}}</span></h1>
+    <h1>{{.Action.Label}} · {{.Guest.Name}} <span class="muted">· {{.Guest.Where}}</span></h1>
     {{with .Det}}<p class="muted">D'après la détection {{age .At}} ({{date .At}}). <a href="/taches/{{.JobID}}">journal</a></p>{{end}}
   </div>
   <a class="btn s push" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}" data-retour>← Retour</a>
-  {{if .Guest.Critical}}<span class="b c">invité critique</span>{{end}}
+  {{if .Guest.Critical}}<span class="b c">{{if .Guest.IsHost}}confirmation renforcée{{else}}invité critique{{end}}</span>{{end}}
 </div>
 {{end}}
 
@@ -66,7 +66,7 @@
       </div>
       <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : appliquer « {{.Action.Label}} » à <strong>{{.Guest.Name}}</strong></label>
       {{if .NeedName}}
-      <label>Invité critique : saisissez son nom (<code>{{.Guest.Name}}</code>)
+      <label>Confirmation renforcée : saisissez son nom (<code>{{.Guest.Name}}</code>)
         <input name="nom" required autocomplete="off" pattern="{{.Guest.Name}}">
       </label>
       {{end}}

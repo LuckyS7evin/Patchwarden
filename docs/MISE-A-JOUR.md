@@ -41,6 +41,9 @@ done
 for n in 192.168.0.141 192.168.0.43 192.168.0.49; do ssh root@$n sha256sum /usr/local/sbin/patchwarden-wrapper; done
 ```
 
+Hôte autonome (VPS, `[[host]]`) : le wrapper s'y installe aussi, voir
+[HOTE-AUTONOME.md](HOTE-AUTONOME.md), « Mettre à jour le wrapper sur le VPS ».
+
 ## 3. Vérifier, dans le CT 103
 
 ```bash
@@ -50,12 +53,25 @@ patchwarden check-config
 Attendu :
 
 - chaque point d'accès Proxmox en ✔ ;
-- les trois nœuds en ✔ avec `pw.wrapper_version=` égal à la version attendue (sinon :
-  refaire l'étape 2) ;
+- les trois nœuds, et chaque hôte autonome, en ✔ avec `pw.wrapper_version=` égal à la
+  version attendue (sinon : refaire l'étape 2) ;
 - chaque instance `[[portainer]]` en ✔, si vous en avez déclaré.
 
 Dans le navigateur, rechargez avec **Ctrl+Maj+R** pour charger le nouveau CSS et le
 nouveau JavaScript (sur téléphone : vider le cache du site, ou fermer et rouvrir l'onglet).
+
+## Vérifier le code avant de fusionner (facultatif)
+
+La CI GitHub ne se lance plus qu'à la main (quota épuisé sur le dépôt privé). Les mêmes
+vérifications tournent dans le CT 103, sur la branche à fusionner :
+
+```bash
+cd /root/Patchwarden
+make ci          # gofmt, go vet, tests, shellcheck, compilation
+```
+
+`apt install gcc shellcheck` pour la version complète (tests avec `-race`, shellcheck) ; sans
+eux, ces deux étapes sont allégées ou sautées et la commande le dit.
 
 ## Changer de branche
 

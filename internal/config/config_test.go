@@ -225,3 +225,42 @@ func TestNotifyURLDoubled(t *testing.T) {
 		}
 	}
 }
+
+func TestHostsSection(t *testing.T) {
+	dir := t.TempDir()
+	key, kh := filepath.Join(dir, "id"), filepath.Join(dir, "known_hosts")
+	_ = os.WriteFile(key, []byte("x"), 0o600)
+	_ = os.WriteFile(kh, nil, 0o600)
+	ssh := "\n[ssh]\nkey_file = \"" + key + "\"\nknown_hosts = \"" + kh + "\"\n"
+	body := valid + ssh + `
+[[host]]
+name = "VPS"
+address = "203.0.113.10:2222"
+tags = ["Cloud"]
+`
+	cfg, _, err := Load(write(t, body, 0o600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := cfg.Hosts[0]
+	if !cfg.SSHEnabled() || cfg.SSH.Enabled() || h.Name != "vps" || h.User != "patchwarden" || h.Address != "203.0.113.10:2222" || h.Tags[0] != "cloud" {
+		t.Errorf("hôte : %+v (ssh %v)", h, cfg.SSHEnabled())
+	}
+	for bad, want := range map[string]string{
+		`name = "vps"` + "\n" + `address = "203.0.113.10"` + "\n" + `user = "root"`: `user = "root" refusé`,
+		`name = "vps"`: "address obligatoire",
+		`name = "vps"` + "\n" + `address = "203.0.113.10:99999"`: "port invalide",
+		`name = "loki"` + "\n" + `address = "203.0.113.10:22"`:   "même nom qu'un nœud",
+		`address = "203.0.113.10:22"`:                            "name obligatoire",
+	} {
+		b := valid + ssh + "[ssh.nodes]\nloki = \"192.168.0.141\"\n\n[[host]]\n" + bad + "\n"
+		if _, _, err := Load(write(t, b, 0o600)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q : attendu %q, obtenu %v", bad, want, err)
+		}
+	}
+	// Sans fichier de clé : même message que pour les nœuds.
+	noKey := valid + "\n[ssh]\nknown_hosts = \"" + kh + "\"\n[[host]]\nname = \"vps\"\naddress = \"203.0.113.10:22\"\n"
+	if _, _, err := Load(write(t, noKey, 0o600)); err == nil || !strings.Contains(err.Error(), "ssh.key_file est obligatoire") {
+		t.Errorf("clé manquante : %v", err)
+	}
+}

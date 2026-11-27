@@ -23,7 +23,7 @@
         <input type="hidden" name="cle_{{.Index}}" value="{{.Row.Key}}">
         <input type="checkbox" name="garder_{{.Index}}" value="1" aria-label="Garder {{.Row.Name}} dans le lot"{{if .Why}} disabled{{else if not .Removed}} checked{{end}}>
       </td>
-      <td><div class="tn"><img class="ic" src="{{.Row.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}">{{.Row.Name}}</a><span class="id">{{.Row.TypeLabel}} {{.Row.VMID}} · {{.Row.Node}}</span></div></td>
+      <td><div class="tn"><img class="ic" src="{{.Row.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}">{{.Row.Name}}</a><span class="id">{{.Row.Where}}</span></div></td>
       <td>
         <select name="op_{{.Index}}" aria-label="Opération pour {{.Row.Name}}">
           {{$cur := .Op}}{{range .Ops}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.Label}}</option>{{end}}

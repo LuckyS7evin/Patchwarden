@@ -80,7 +80,7 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 	maint := todoGroup{Key: "entretien", Title: "Entretien"}
 
 	for _, g := range snap.Guests {
-		if g.Template || (g.Type != "lxc" && g.Type != "qemu") {
+		if g.Template || !g.Managed() {
 			continue
 		}
 		det, ok := all[g.Key()]

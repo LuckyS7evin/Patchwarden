@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +57,8 @@ type Config struct {
 	EOL       EOL         `toml:"eol"`
 	Docker    Docker      `toml:"docker"`
 	Portainer []Portainer `toml:"portainer"`
+	// Hosts : hôtes autonomes (VPS, machines hors Proxmox) joints par SSH.
+	Hosts []Host `toml:"host"`
 	// Maintenance : fenêtres de maintenance (lots programmés, sécurité automatique).
 	Maintenance []Maintenance `toml:"maintenance"`
 	// AutoSecurity : « Sécurité uniquement » appliqué seul dans une fenêtre.
@@ -109,6 +112,23 @@ type Docker struct {
 
 // DefaultRegistries : registres publics interrogés par défaut.
 var DefaultRegistries = []string{"docker.io", "ghcr.io", "lscr.io", "quay.io", "gcr.io", "registry.gitlab.com", "codeberg.org", "public.ecr.aws", "mcr.microsoft.com", "docker.elastic.co", "registry.k8s.io"}
+
+// Host est un hôte autonome : une machine hors Proxmox (VPS…) que PatchWarden
+// joint directement par SSH, avec un compte dédié et sudo limité au wrapper.
+// Pas de snapshot ni de retour arrière : confirmation renforcée systématique.
+type Host struct {
+	// Name : nom affiché, et identifiant (minuscules, chiffres, tirets).
+	Name string `toml:"name"`
+	// Address : hôte:port (port 22 par défaut).
+	Address string `toml:"address"`
+	// User : compte SSH sur l'hôte (défaut : patchwarden).
+	User string `toml:"user"`
+	// Tags : comme les tags Proxmox (fenêtres de maintenance, filtres).
+	Tags []string `toml:"tags"`
+}
+
+// SSHEnabled indique si au moins un nœud ou un hôte autonome est joignable par SSH.
+func (c *Config) SSHEnabled() bool { return len(c.SSH.Nodes) > 0 || len(c.Hosts) > 0 }
 
 // Portainer est une instance Portainer : ses stacks sont mises à jour par
 // son API (re-déploiement avec téléchargement des images). Les invités sont
@@ -278,6 +298,7 @@ type Inventory struct {
 
 var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	userRe    = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 	selfRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]*/[1-9][0-9]*$`)
 	tokenIDRe = regexp.MustCompile(`^[^@!\s]+@[^@!\s]+![A-Za-z][A-Za-z0-9._-]*$`)
 )
@@ -343,6 +364,19 @@ func (c *Config) applyDefaults() {
 	for n, a := range c.SSH.Nodes {
 		if _, _, err := net.SplitHostPort(a); err != nil {
 			c.SSH.Nodes[n] = net.JoinHostPort(a, "22")
+		}
+	}
+	for i := range c.Hosts {
+		h := &c.Hosts[i]
+		h.Name = strings.ToLower(strings.TrimSpace(h.Name))
+		if h.User == "" {
+			h.User = "patchwarden"
+		}
+		if _, _, err := net.SplitHostPort(h.Address); err != nil && h.Address != "" {
+			h.Address = net.JoinHostPort(h.Address, "22")
+		}
+		for j, t := range h.Tags {
+			h.Tags[j] = strings.ToLower(strings.TrimSpace(t))
 		}
 	}
 	if c.Jobs.DataDir == "" {
@@ -644,7 +678,7 @@ func (c *Config) Validate() error {
 	if c.Policy.SelfGuest != "" && !selfRe.MatchString(c.Policy.SelfGuest) {
 		add("policy.self_guest : format « nœud/vmid » attendu (ex. loki/103), obtenu %q", c.Policy.SelfGuest)
 	}
-	if c.SSH.Enabled() {
+	if c.SSHEnabled() {
 		if c.SSH.KeyFile == "" {
 			add("ssh.key_file est obligatoire (générez la clé avec : patchwarden ssh-keygen)")
 		} else if _, err := os.Stat(c.SSH.KeyFile); err != nil {
@@ -662,6 +696,32 @@ func (c *Config) Validate() error {
 			if h, p, err := net.SplitHostPort(a); err != nil || h == "" || p == "" {
 				add("ssh.nodes.%s : adresse invalide %q", n, a)
 			}
+		}
+	}
+	seenH := map[string]bool{}
+	for i, h := range c.Hosts {
+		label := fmt.Sprintf("host[%d]", i)
+		if h.Name != "" {
+			label = "host " + h.Name
+		}
+		switch {
+		case !nameRe.MatchString(h.Name):
+			add("%s : name obligatoire (minuscules, chiffres, tirets, 32 caractères au plus), obtenu %q", label, h.Name)
+		case seenH[h.Name]:
+			add("%s : nom déjà utilisé par un autre [[host]]", label)
+		case c.SSH.Nodes[h.Name] != "":
+			add("%s : même nom qu'un nœud de [ssh.nodes] ; un nœud Proxmox ne se déclare jamais en [[host]]", label)
+		}
+		seenH[h.Name] = true
+		if hh, p, err := net.SplitHostPort(h.Address); err != nil || hh == "" || p == "" {
+			add("%s : address obligatoire, au format hôte:port (ex. 203.0.113.10:2222), obtenu %q", label, h.Address)
+		} else if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			add("%s : port invalide %q", label, p)
+		}
+		if !userRe.MatchString(h.User) {
+			add("%s : user invalide %q", label, h.User)
+		} else if h.User == "root" {
+			add("%s : user = \"root\" refusé : créez un compte dédié limité au wrapper par sudo (README, « Hôtes autonomes »)", label)
 		}
 	}
 	if c.Jobs.MaxParallel < 1 || c.Jobs.MaxParallel > 16 {

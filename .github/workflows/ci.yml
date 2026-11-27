@@ -1,12 +1,16 @@
-# Vérifications à chaque pull request et à chaque envoi sur main : formatage,
-# analyse statique, tests (avec détection des accès concurrents), shellcheck
-# sur le wrapper des nœuds et la sonde, compilation du binaire.
+# Vérifications : formatage, analyse statique, tests (avec détection des accès
+# concurrents), shellcheck sur le wrapper des nœuds et la sonde, compilation.
+#
+# Lancement manuel uniquement (onglet Actions → CI → Run workflow) : le dépôt est
+# privé et le quota de minutes GitHub Actions est épuisé. Les mêmes vérifications
+# se lancent en local avec `make ci` (voir docs/MISE-A-JOUR.md). Pour revenir au
+# lancement automatique, ajouter sous « on: » :
+#   push:
+#     branches: [main]
+#   pull_request:
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:

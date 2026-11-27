@@ -1,10 +1,17 @@
 #!/bin/bash
 # ==============================================================================
-# PatchWarden - wrapper des nœuds Proxmox
+# PatchWarden - wrapper des nœuds Proxmox et des hôtes autonomes
 # ==============================================================================
 # Seule commande que la clé SSH de PatchWarden peut lancer sur un nœud :
 #
 #   command="/usr/local/sbin/patchwarden-wrapper",from="<IP PatchWarden>",restrict ssh-ed25519 AAAA… patchwarden
+#
+# Sur un hôte autonome (VPS, machine hors Proxmox), la clé ouvre un compte dédié
+# sans droits, qui ne peut lancer que ce fichier, sans argument, par sudo :
+#
+#   command="sudo -n /usr/local/sbin/patchwarden-wrapper",from="<IP publique>",restrict ssh-ed25519 AAAA… patchwarden
+#   (sudoers) Defaults!/usr/local/sbin/patchwarden-wrapper env_keep += "SSH_ORIGINAL_COMMAND"
+#   (sudoers) patchwarden ALL=(root) NOPASSWD: /usr/local/sbin/patchwarden-wrapper ""
 #
 # La commande demandée par PatchWarden arrive dans SSH_ORIGINAL_COMMAND. Elle
 # doit appartenir au petit vocabulaire ci-dessous ; tout le reste est refusé
@@ -12,8 +19,9 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 13) :
-#   ping                                   version du wrapper et nom du nœud
+# Verbes (version 14) :
+#   ping                                   version du wrapper, nom de la machine, version de
+#                                          Proxmox (vide hors nœud), identifiant de démarrage
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
 #   lxc-apt <vmid> <security|full> <0|1>   mise à jour apt (1 = simulation, rien n'est modifié)
@@ -58,6 +66,14 @@
 #   standard) ; les opérations longues tournent en arrière-plan dans la VM et
 #   leur journal est relu toutes les 2 s.
 #
+#   host-detect, host-apt, host-restart-services, host-reboot, host-docker-compose,
+#   host-docker-prune : hôte autonome, la machine elle-même (identifiant : 0). Mêmes
+#   arguments et mêmes scripts, exécutés directement. REFUSÉS sur un nœud Proxmox :
+#   PatchWarden ne met jamais à jour un hôte Proxmox. Pas de snapshot ni de retour
+#   arrière, pas de démarrage ni d'arrêt. host-reboot programme le redémarrage
+#   5 s plus tard (systemd-run) et rend la main : PatchWarden attend ensuite que
+#   l'identifiant de démarrage (ping) change.
+#
 # Snapshots : seuls ceux dont le nom suit pw-AAAAMMJJ-HHMM-(complet|securite|docker)
 # sont acceptés. Les snapshots créés à la main ne sont jamais touchés.
 #
@@ -78,7 +94,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=13
+WRAPPER_VERSION=14
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -87,6 +103,11 @@ TIMEOUT_UPDATE=3600
 # pas transmettre cette variable (sshd n'accepte par défaut que LANG et LC_*).
 # Ne jamais ajouter PATCHWARDEN_* à AcceptEnv dans sshd_config.
 PVE_DIR="${PATCHWARDEN_PVE_DIR:-/etc/pve}"
+# Hôte autonome, tests seulement : shell des scripts et fichier de l'identifiant
+# de démarrage. Sur un hôte, sudo (env_reset) ne transmet de toute façon que
+# SSH_ORIGINAL_COMMAND.
+HOST_SHELL="${PATCHWARDEN_HOST_SHELL:-sh}"
+BOOT_ID_FILE="${PATCHWARDEN_BOOT_ID:-/proc/sys/kernel/random/boot_id}"
 LOG_DIR="${PATCHWARDEN_LOG_DIR:-/var/log/patchwarden}"
 LOCK_DIR="${PATCHWARDEN_LOCK_DIR:-/run/lock}"
 # Attente maximale (s) et intervalle (s) pour que le CT voie ses ressources augmentées.
@@ -118,23 +139,37 @@ read -r -a ARGS <<<"$CMD"
 VERB="${ARGS[0]:-}"
 [[ -n "$VERB" ]] || refuse "commande vide"
 
-# Type d'invité, d'après le préfixe du verbe : lxc- (pct) ou vm- (qm).
+# Type d'invité, d'après le préfixe du verbe : lxc- (pct), vm- (qm) ou host-
+# (hôte autonome : la machine elle-même).
 GT=lxc TOOL=pct API=lxc CONFDIR=lxc NOUN=CT
 BASE="$VERB"
-if [[ "$VERB" =~ ^(lxc|vm)-([a-z-]+)$ ]]; then
+if [[ "$VERB" =~ ^(lxc|vm|host)-([a-z-]+)$ ]]; then
 	BASE="${BASH_REMATCH[2]}"
-	if [[ "${BASH_REMATCH[1]}" == vm ]]; then
-		GT=vm TOOL=qm API=qemu CONFDIR=qemu-server NOUN=VM
-	fi
+	case "${BASH_REMATCH[1]}" in
+	vm) GT=vm TOOL=qm API=qemu CONFDIR=qemu-server NOUN=VM ;;
+	host) GT=host TOOL="" API="" CONFDIR="" NOUN=hôte ;;
+	esac
 elif [[ "$VERB" != ping ]]; then
 	refuse "verbe inconnu : ${VERB}"
 fi
 
+# Nœud Proxmox : pmxcfs monté ou outils Proxmox présents.
+is_pve() { [[ -d "${PVE_DIR}/nodes" ]] || command -v pveversion >/dev/null 2>&1; }
+
+# Jamais de host-* sur un nœud Proxmox : l'hôte Proxmox n'est jamais mis à jour.
+if [[ "$GT" == host ]] && is_pve; then
+	refuse "verbe d'hôte autonome refusé sur un nœud Proxmox : ${VERB} (PatchWarden ne met jamais à jour un hôte Proxmox)"
+fi
+
 guest_conf() { echo "${PVE_DIR}/nodes/${NODE}/${CONFDIR}/${VMID}.conf"; }
 
-# Vérifie que l'invité existe sur CE nœud.
+# Vérifie que l'invité existe sur CE nœud (hôte autonome : identifiant 0).
 check_guest_exists() {
 	VMID="$1"
+	if [[ "$GT" == host ]]; then
+		[[ "$VMID" == 0 ]] || refuse "hôte autonome : identifiant 0 attendu, reçu ${VMID}"
+		return 0
+	fi
 	[[ "$VMID" =~ ^[1-9][0-9]{1,8}$ ]] || refuse "VMID invalide : $VMID"
 	[[ -f "$(guest_conf)" ]] || refuse "${NOUN} ${VMID} absent du nœud ${NODE}"
 }
@@ -144,6 +179,7 @@ check_guest_exists() {
 check_guest() {
 	local status
 	check_guest_exists "$1"
+	[[ "$GT" == host ]] && return 0
 	status="$("$TOOL" status "$VMID" 2>/dev/null)"
 	if [[ "$status" != "status: running" ]]; then
 		echo "PW-ARRETE: ${NOUN} ${VMID} non démarré (${status:-état inconnu})" >&2
@@ -673,7 +709,9 @@ vm_stream() {
 g_sh() {
 	local t="$1"
 	shift
-	if [[ "$GT" == vm ]]; then
+	if [[ "$GT" == host ]]; then
+		(cd / && timeout "$t" "$HOST_SHELL" -s -- "$@")
+	elif [[ "$GT" == vm ]]; then
 		vm_cmd "$t" sh -s -- "$@"
 	else
 		timeout "$t" pct exec "$VMID" -- sh -s -- "$@"
@@ -683,7 +721,9 @@ g_sh() {
 g_stream() {
 	local t="$1"
 	shift
-	if [[ "$GT" == vm ]]; then
+	if [[ "$GT" == host ]]; then
+		(cd / && timeout "$t" "$HOST_SHELL" -s -- "$@")
+	elif [[ "$GT" == vm ]]; then
 		vm_stream "$t" "$@"
 	else
 		timeout "$t" pct exec "$VMID" -- sh -s -- "$@"
@@ -705,7 +745,9 @@ run_detached() {
 	fi
 	mkdir -p "$LOG_DIR" && chmod 700 "$LOG_DIR"
 	find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -mtime +30 -delete 2>/dev/null
-	logf="${LOG_DIR}/${VMID}-$(date +%Y%m%d-%H%M%S)-${label}.log"
+	local id="$VMID"
+	[[ "$GT" == host ]] && id=hote
+	logf="${LOG_DIR}/${id}-$(date +%Y%m%d-%H%M%S)-${label}.log"
 	: >"$logf"
 	echo "pw.node_log=${logf}"
 	setsid -w flock -n -E 99 "${LOCK_DIR}/patchwarden-${VMID}.lock" "$SELF" --detache </dev/null >>"$logf" 2>&1 &
@@ -990,8 +1032,28 @@ run_restart_services() {
 ${RESTARTSVC}"
 }
 
+boot_id() { tr -cd 'A-Za-z0-9-' <"$BOOT_ID_FILE" 2>/dev/null; }
+
+# Hôte autonome : le redémarrage est programmé 5 s plus tard pour que la
+# connexion SSH se termine proprement ; PatchWarden suit ensuite le changement
+# d'identifiant de démarrage (verbe ping).
+run_host_reboot() {
+	log "${VERB}"
+	echo "pw.boot_id=$(boot_id)"
+	if ! command -v systemd-run >/dev/null 2>&1; then
+		echo "PW-ERREUR: systemd-run absent : redémarrez l'hôte à la main"
+		exit 52
+	fi
+	if ! systemd-run --quiet --on-active=5 --unit="patchwarden-reboot-$(date +%s)" systemctl reboot </dev/null; then
+		echo "PW-ERREUR: programmation du redémarrage impossible (systemd-run)"
+		exit 52
+	fi
+	echo "PW: redémarrage de l'hôte programmé dans 5 s (systemctl reboot)"
+}
+
 run_reboot() {
 	local st i
+	[[ "$GT" == host ]] && { run_host_reboot; return; }
 	log "${VERB} ${VMID}"
 	echo "PW: redémarrage de l'invité ${VMID} (${TOOL} reboot)"
 	if ! timeout 300 "$TOOL" reboot "$VMID" --timeout 120 </dev/null; then
@@ -1081,6 +1143,10 @@ run_docker_compose() {
 if [[ "$GT" == vm && ! "$BASE" =~ ^(detect|apt|snapshot|snapdel|rollback|restart-services|reboot|docker-compose|start|shutdown|docker-prune)$ ]]; then
 	refuse "verbe indisponible pour une VM : ${VERB}"
 fi
+# Hôte autonome : ni snapshot, ni démarrage, ni arrêt, ni script community-scripts.
+if [[ "$GT" == host && ! "$BASE" =~ ^(detect|apt|restart-services|reboot|docker-compose|docker-prune)$ ]]; then
+	refuse "verbe indisponible pour un hôte autonome : ${VERB}"
+fi
 
 case "$BASE" in
 ping)
@@ -1088,6 +1154,7 @@ ping)
 	echo "pw.wrapper_version=${WRAPPER_VERSION}"
 	echo "pw.node=${NODE}"
 	echo "pw.pve=$(pveversion 2>/dev/null | head -n 1)"
+	echo "pw.boot_id=$(boot_id)"
 	;;
 detect)
 	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : ${VERB} <vmid> <0|1>"
@@ -1098,7 +1165,7 @@ detect)
 ${RESTARTSCAN}
 ${DETECT}"
 	rc=$?
-	snap_info
+	[[ "$GT" == host ]] || snap_info
 	exit "$rc"
 	;;
 versions)

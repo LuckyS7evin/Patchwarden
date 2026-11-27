@@ -3,7 +3,7 @@
 {{with .Row}}
 <p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></p>
 <div class="pagehead">
-  <div><h1>{{if eq $.What "services"}}Redémarrer les services{{else}}Redémarrer {{guestNoun .Type}}{{end}} · {{.Name}} <span class="muted">· {{.TypeLabel}} {{.VMID}} sur {{.Node}}</span></h1></div>
+  <div><h1>{{if eq $.What "services"}}Redémarrer les services{{else}}Redémarrer {{guestNoun .Type}}{{end}} · {{.Name}} <span class="muted">· {{.Where}}</span></h1></div>
   <a class="btn s push" href="/invites/{{.Node}}/{{.VMID}}" data-retour>← Retour</a>
 </div>
 {{end}}
@@ -35,6 +35,13 @@
     <li>une détection vérifie le résultat.</li>
   </ol>
   <p class="small">Coupure brève de chaque service redémarré.</p>
+  {{else if .Row.IsHost}}
+  <ol class="steps">
+    <li><code>systemctl reboot</code>, programmé 5 s plus tard sur l'hôte (la connexion SSH se termine d'abord) ;</li>
+    <li>attente que l'hôte réponde de nouveau, avec un nouveau démarrage (10 minutes au plus) ;</li>
+    <li>une détection vérifie le résultat.</li>
+  </ol>
+  <p class="alert alert-warn">Hôte autonome : s'il ne redémarre pas correctement, seule la console de l'hébergeur permet d'intervenir. Aucun retour arrière n'est possible.</p>
   {{else}}
   <ol class="steps">
     <li><code>{{if eq .Row.Type "qemu"}}qm{{else}}pct{{end}} reboot</code> : arrêt propre puis démarrage ;</li>
@@ -47,7 +54,7 @@
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <label class="check"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : {{if eq .What "services"}}redémarrer ces services{{else}}redémarrer {{guestNoun .Row.Type}}{{end}} sur <strong>{{.Row.Name}}</strong></span></label>
     {{if and (ne .What "services") .Plan.NeedName}}
-    <label>Invité critique : saisissez son nom (<code>{{.Row.Name}}</code>)
+    <label>Confirmation renforcée : saisissez son nom (<code>{{.Row.Name}}</code>)
       <input name="nom" required autocomplete="off">
     </label>
     {{end}}

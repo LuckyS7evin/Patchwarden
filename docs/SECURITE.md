@@ -75,6 +75,6 @@ contre l'installation réelle.
 
 ## Vérifications automatiques
 
-L'intégration continue (`.github/workflows/ci.yml`) lance à chaque pull request : `gofmt`,
+`make ci` (et la CI GitHub, `.github/workflows/ci.yml`, lancée à la main) vérifie : `gofmt`,
 `go vet`, les tests avec détection des accès concurrents (`-race`), `shellcheck` sur le
 wrapper et la sonde, et la compilation.

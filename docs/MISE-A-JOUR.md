@@ -57,6 +57,19 @@ Attendu :
 Dans le navigateur, rechargez avec **Ctrl+Maj+R** pour charger le nouveau CSS et le
 nouveau JavaScript (sur téléphone : vider le cache du site, ou fermer et rouvrir l'onglet).
 
+## Vérifier le code avant de fusionner (facultatif)
+
+La CI GitHub ne se lance plus qu'à la main (quota épuisé sur le dépôt privé). Les mêmes
+vérifications tournent dans le CT 103, sur la branche à fusionner :
+
+```bash
+cd /root/Patchwarden
+make ci          # gofmt, go vet, tests, shellcheck, compilation
+```
+
+`apt install gcc shellcheck` pour la version complète (tests avec `-race`, shellcheck) ; sans
+eux, ces deux étapes sont allégées ou sautées et la commande le dit.
+
 ## Changer de branche
 
 Le CT 103 met à jour la branche sur laquelle le dépôt est placé. Pour en changer :

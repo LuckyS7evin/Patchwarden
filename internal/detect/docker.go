@@ -105,9 +105,9 @@ func (g DockerGroup) Updatable() bool { return g.Blocker == "" && g.Updates > 0 
 
 // Docker décrit les conteneurs d'un invité.
 type Docker struct {
-	Compose    string        `json:"compose,omitempty"` // version de docker compose v2
+	Compose string `json:"compose,omitempty"` // version de docker compose v2
 	// Dangling : images sans nom (anciennes versions laissées par les mises à jour).
-	Dangling int `json:"dangling,omitempty"`
+	Dangling   int           `json:"dangling,omitempty"`
 	List       []Container   `json:"list,omitempty"`
 	Groups     []DockerGroup `json:"groups,omitempty"`
 	Watchtower []string      `json:"watchtower,omitempty"` // conteneurs Watchtower démarrés

@@ -14,7 +14,7 @@
     <tbody>
     {{range .Rows}}
     <tr>
-      <td><div class="tn"><img class="ic" src="{{.Row.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}?onglet=snapshots">{{.Row.Name}}</a><span class="id">{{.Row.TypeLabel}} {{.Row.VMID}} · {{.Row.Node}}</span></div></td>
+      <td><div class="tn"><img class="ic" src="{{.Row.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}?onglet=snapshots">{{.Row.Name}}</a><span class="id">{{.Row.Where}}</span></div></td>
       <td class="nowrap"><code>{{.Snap.Name}}</code></td>
       <td class="nowrap">{{if not .Snap.Time.IsZero}}{{age .Snap.Time}}{{end}}</td>
       <td class="small">{{.Snap.Description}}</td>

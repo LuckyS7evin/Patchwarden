@@ -90,6 +90,15 @@ type Plan struct {
 // OK indique que l'action est possible.
 func (p Plan) OK() bool { return len(p.Blockers) == 0 }
 
+// criticalWarning : avertissement de confirmation renforcée d'un invité critique
+// ou d'un hôte autonome.
+func criticalWarning(g inventory.Guest) string {
+	if g.IsHost() {
+		return "hôte autonome : saisissez son nom pour confirmer"
+	}
+	return "invité critique (" + g.CriticalReason + ") : saisissez son nom pour confirmer"
+}
+
 // IsSelf indique si l'invité héberge PatchWarden.
 func (e *Engine) IsSelf(g inventory.Guest) bool {
 	if e.SelfGuest != "" {
@@ -183,7 +192,7 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 		p.Warnings = append(p.Warnings, "un redémarrage de l'invité est déjà requis (mise à jour précédente)")
 	}
 	if g.Critical {
-		p.Warnings = append(p.Warnings, "invité critique ("+g.CriticalReason+") : saisissez son nom pour confirmer")
+		p.Warnings = append(p.Warnings, criticalWarning(g))
 	}
 	if w := e.outsideWindow(g); w != "" {
 		p.Warnings = append(p.Warnings, w)

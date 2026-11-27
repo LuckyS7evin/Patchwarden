@@ -11,7 +11,8 @@ contre l'installation réelle.
 | :--- | :--- |
 | Un appareil du réseau local, sans compte | Lire ou modifier quoi que ce soit, lancer une action |
 | Un invité compromis (LXC, VM, conteneur) | Agir sur l'hôte Proxmox ou sur un autre invité ; faire exécuter du code à PatchWarden ; s'en servir pour joindre d'autres machines |
-| Une instance PatchWarden compromise | Prendre la main sur les nœuds au-delà du vocabulaire du wrapper ; toucher aux snapshots manuels |
+| Une instance PatchWarden compromise | Prendre la main sur les nœuds ou les hôtes autonomes au-delà du vocabulaire du wrapper ; toucher aux snapshots manuels |
+| Internet, face au port SSH d'un hôte autonome (VPS) | Se connecter avec la clé de PatchWarden depuis une autre adresse ; obtenir un shell ou des droits root par ce compte |
 | Un site tiers ouvert dans le navigateur de l'administrateur | Déclencher une action à sa place (CSRF), lire les pages |
 
 ## Ce qui est en place
@@ -28,6 +29,16 @@ contre l'installation réelle.
 - Seuls les invités présents sur ce nœud sont visés, jamais l'hôte. Une instance compromise ne
   peut ni supprimer ni restaurer un snapshot manuel.
 - Les clés d'hôte des nœuds sont toujours vérifiées (`known_hosts`).
+
+**Hôtes autonomes (VPS, `[[host]]`, depuis le wrapper v14)**
+- Compte dédié sans mot de passe utilisable (root refusé dans la configuration). La clé y est
+  limitée par `command="sudo -n …wrapper"`, `from=` (IP publique de la box) et `restrict`.
+- sudoers : le wrapper seul, en root, **sans argument** (`""`), et seule la variable
+  `SSH_ORIGINAL_COMMAND` transmise ; `env_reset` efface le reste (dont les `PATCHWARDEN_*` de test).
+- Mêmes filtres et même vocabulaire que sur les nœuds ; verbes `host-*` refusés sur un nœud
+  Proxmox (et un nœud déclaré par erreur en `[[host]]` est refusé par l'inventaire).
+- Pas de snapshot possible : confirmation renforcée systématique, hors lots et hors sécurité
+  automatique.
 
 **Interface web**
 - Un compte, mot de passe bcrypt, comparaison en temps constant de l'identifiant ; 5 essais
@@ -71,6 +82,8 @@ contre l'installation réelle.
 | Jeton Portainer | Portainer CE n'a pas de rôle intermédiaire : le jeton peut souvent plus que le re-déploiement | Utilisateur dédié, accès limité aux environnements et stacks concernés |
 | Variables `PATCHWARDEN_*` du wrapper | Elles servent aux tests (chemins, délais). sshd ne les transmet pas par défaut | Ne jamais les ajouter à `AcceptEnv` sur les nœuds |
 | Journaux | Le journal d'une tâche reprend la sortie des commandes de l'invité | Ne pas y faire afficher de secrets (scripts tiers) |
+| Hôte autonome exposé sur Internet | Le port SSH est public ; la clé ne sert que depuis l'IP de la box (`from=`) et n'ouvre que le wrapper. Une IP publique qui change bloque PatchWarden (rien ne s'ouvre) | Pare-feu de l'hébergeur ou `ufw` limitant le port SSH, connexion par clé seulement (`PasswordAuthentication no`), fail2ban |
+| Pas de retour arrière sur un hôte autonome | Une mise à jour ratée se répare à la main | Sauvegarde ou snapshot chez l'hébergeur avant une mise à jour importante ; simulation d'abord |
 | Sécurité automatique | Exception assumée à « aucune action sans confirmation » : le tag vaut confirmation | Désactivée par défaut ; limitée à « Sécurité uniquement », snapshot, vérification, arrêt au premier échec |
 
 ## Vérifications automatiques

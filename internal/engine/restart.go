@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 )
 
 // RestartPlan décrit les redémarrages utiles sur un invité.
@@ -137,8 +139,62 @@ func (e *Engine) Reboot(g inventory.Guest, user string, confirmed bool, typedNam
 		if err := explainCodes(code, errs, out, 52); err != nil {
 			return "", err
 		}
+		if g.IsHost() {
+			if err := e.waitHostBack(ctx, g, bootID(out), log); err != nil {
+				return "", err
+			}
+		}
 		return e.verify(ctx, g, before, job, log, guestNoun(g)+" redémarré")
 	})
+}
+
+func bootID(out []string) string {
+	id := ""
+	for _, l := range out {
+		if v, ok := strings.CutPrefix(l, "pw.boot_id="); ok {
+			id = strings.TrimSpace(v)
+		}
+	}
+	return id
+}
+
+// waitHostBack attend qu'un hôte autonome réponde de nouveau après son
+// redémarrage, avec un identifiant de démarrage différent de before (le
+// wrapper programme le redémarrage quelques secondes plus tard et rend la main).
+func (e *Engine) waitHostBack(ctx context.Context, g inventory.Guest, before string, log jobs.Logger) error {
+	back, poll := e.HostBack, e.HostPoll
+	if back <= 0 {
+		back = 10 * time.Minute
+	}
+	if poll <= 0 {
+		poll = 15 * time.Second
+	}
+	log(false, fmt.Sprintf("Attente du retour de l'hôte (%s au plus)…", back))
+	deadline := time.Now().Add(back)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+		var out []string
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		code, err := e.Runner.Run(cctx, g.Node, "ping", func(l sshx.Line) {
+			if !l.Stderr {
+				out = append(out, l.Text)
+			}
+		})
+		cancel()
+		if err == nil && code == 0 {
+			if id := bootID(out); before == "" || (id != "" && id != before) {
+				log(false, "Hôte de nouveau joignable, après un nouveau démarrage")
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("l'hôte n'a pas répondu après un nouveau démarrage dans les %s : vérifiez-le depuis la console de l'hébergeur", back)
+		}
+	}
 }
 
 // verify relance une détection après une action, vérifie l'invité et résume.

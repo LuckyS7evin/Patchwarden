@@ -116,7 +116,7 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 			known = true
 		}
 	}
-	if !known || (d.Tab == "docker" && d.DockerGroups == nil) {
+	if !known || (d.Tab == "docker" && d.DockerGroups == nil) || (d.Tab == "snapshots" && g.IsHost()) {
 		d.Tab = ""
 	}
 	for _, t := range guestTabs {
@@ -137,6 +137,9 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 				tl.Badge, tl.BadgeClass = fmt.Sprint(n), "w"
 			}
 		case "snapshots":
+			if g.IsHost() {
+				continue
+			}
 			if d.Row.Det != nil && len(d.Row.Det.Snap.PW) > 0 {
 				tl.Badge, tl.BadgeClass = fmt.Sprint(len(d.Row.Det.Snap.PW)), "v"
 			}

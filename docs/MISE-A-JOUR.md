@@ -41,6 +41,9 @@ done
 for n in 192.168.0.141 192.168.0.43 192.168.0.49; do ssh root@$n sha256sum /usr/local/sbin/patchwarden-wrapper; done
 ```
 
+Hôte autonome (VPS, `[[host]]`) : le wrapper s'y installe aussi, voir
+[HOTE-AUTONOME.md](HOTE-AUTONOME.md), « Mettre à jour le wrapper sur le VPS ».
+
 ## 3. Vérifier, dans le CT 103
 
 ```bash
@@ -50,8 +53,8 @@ patchwarden check-config
 Attendu :
 
 - chaque point d'accès Proxmox en ✔ ;
-- les trois nœuds en ✔ avec `pw.wrapper_version=` égal à la version attendue (sinon :
-  refaire l'étape 2) ;
+- les trois nœuds, et chaque hôte autonome, en ✔ avec `pw.wrapper_version=` égal à la
+  version attendue (sinon : refaire l'étape 2) ;
 - chaque instance `[[portainer]]` en ✔, si vous en avez déclaré.
 
 Dans le navigateur, rechargez avec **Ctrl+Maj+R** pour charger le nouveau CSS et le

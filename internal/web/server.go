@@ -201,8 +201,11 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 	funcs["upper"] = strings.ToUpper
 	funcs["hasPrefix"] = strings.HasPrefix
 	funcs["guestNoun"] = func(typ string) string {
-		if typ == "qemu" {
+		switch typ {
+		case "qemu":
 			return "la VM"
+		case inventory.TypeHost:
+			return "l'hôte"
 		}
 		return "le CT"
 	}
@@ -456,6 +459,9 @@ type nodeGroup struct {
 
 // row est un invité tel qu'affiché : sa dernière détection, sa tâche en cours
 // et ce qui est possible.
+// hostGroup : groupe de l'inventaire des hôtes autonomes ([[host]]).
+const hostGroup = "Hôtes autonomes"
+
 type row struct {
 	inventory.Guest
 	Icon      string
@@ -699,6 +705,9 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 		}
 		d.Shown++
 		keys := []string{g.Node}
+		if g.IsHost() {
+			keys = []string{hostGroup}
+		}
 		if d.ByTag {
 			keys = nil
 			for _, t := range rw.ShownTags {
@@ -751,7 +760,7 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 			d.Groups = append(d.Groups, *groups[k])
 		}
 	} else {
-		for _, n := range d.Nodes {
+		for _, n := range append(d.Nodes, hostGroup) {
 			if ng, ok := groups[n]; ok {
 				d.Groups = append(d.Groups, *ng)
 			}

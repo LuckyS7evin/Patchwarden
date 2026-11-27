@@ -147,3 +147,37 @@ func TestNodeStats(t *testing.T) {
 		t.Errorf("nœud injoignable : %+v", st)
 	}
 }
+
+func TestHostsGroupedAndCritical(t *testing.T) {
+	host := &fake{name: "hôte vps", res: []proxmox.Resource{{Type: TypeHost, Node: "vps", Name: "vps", Status: "running", Tags: "cloud"}}}
+	s := newSvc(&fake{name: "loki", res: cluster()}, host)
+	s.Refresh(context.Background())
+	snap, _ := s.Current()
+	var h *Guest
+	for i := range snap.Guests {
+		if snap.Guests[i].IsHost() {
+			h = &snap.Guests[i]
+		}
+	}
+	if h == nil || !h.Critical || !h.Managed() || h.TypeLabel() != "Hôte" || h.Where() != "hôte autonome" || h.Key() != "vps/0" || h.Tags[0] != "cloud" {
+		t.Fatalf("hôte : %+v", h)
+	}
+	for _, n := range snap.Nodes() {
+		if n == "vps" {
+			t.Errorf("un hôte autonome n'est pas un nœud : %v", snap.Nodes())
+		}
+	}
+	// Injoignable : reste affiché, état inconnu, erreur publiée.
+	host.res[0].Status, host.err = "unknown", errors.New("connexion refusée")
+	s.Refresh(context.Background())
+	snap, _ = s.Current()
+	found := false
+	for _, g := range snap.Guests {
+		if g.IsHost() && g.Status == "unknown" {
+			found = true
+		}
+	}
+	if !found || snap.Errors["hôte vps"] == "" {
+		t.Errorf("hôte injoignable : %+v %v", snap.Guests, snap.Errors)
+	}
+}

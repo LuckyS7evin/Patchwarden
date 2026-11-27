@@ -41,11 +41,13 @@ type Executor struct {
 	signer      ssh.Signer
 	hostKey     ssh.HostKeyCallback
 	nodes       map[string]string
+	users       map[string]string // compte propre à une cible (hôtes autonomes)
 	dialTimeout time.Duration
 }
 
-// New charge la clé privée et le fichier known_hosts.
-func New(cfg config.SSH) (*Executor, error) {
+// New charge la clé privée et le fichier known_hosts. hosts : hôtes autonomes
+// ([[host]]), joints avec leur propre compte.
+func New(cfg config.SSH, hosts []config.Host) (*Executor, error) {
 	pem, err := os.ReadFile(cfg.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("clé SSH : %w", err)
@@ -58,7 +60,25 @@ func New(cfg config.SSH) (*Executor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("known_hosts : %w", err)
 	}
-	return NewWith(cfg.User, signer, cb, cfg.Nodes, cfg.ConnectTimeout.Duration), nil
+	e := NewWith(cfg.User, signer, cb, cfg.Nodes, cfg.ConnectTimeout.Duration)
+	for _, h := range hosts {
+		e.AddHost(h.Name, h.Address, h.User)
+	}
+	return e, nil
+}
+
+// AddHost déclare un hôte autonome : adresse hôte:port et compte SSH.
+func (e *Executor) AddHost(name, addr, user string) {
+	nodes := make(map[string]string, len(e.nodes)+1)
+	for k, v := range e.nodes {
+		nodes[k] = v
+	}
+	nodes[name] = addr
+	e.nodes = nodes
+	if e.users == nil {
+		e.users = map[string]string{}
+	}
+	e.users[name] = user
 }
 
 // NewWith construit un exécuteur à partir d'éléments déjà chargés (tests).
@@ -86,8 +106,12 @@ func (e *Executor) Run(ctx context.Context, node, command string, out func(Line)
 		return -1, fmt.Errorf("connexion à %s (%s) : %w", node, addr, err)
 	}
 	_ = conn.SetDeadline(time.Now().Add(e.dialTimeout))
+	user := e.user
+	if u, ok := e.users[node]; ok {
+		user = u
+	}
 	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
-		User:              e.user,
+		User:              user,
 		Auth:              []ssh.AuthMethod{ssh.PublicKeys(e.signer)},
 		HostKeyCallback:   e.hostKey,
 		HostKeyAlgorithms: knownAlgorithms(e.hostKey, addr),

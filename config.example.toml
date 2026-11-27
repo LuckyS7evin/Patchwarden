@@ -73,6 +73,16 @@ connect_timeout = "10s"
 # tyr = "192.168.0.43"
 # odin = "192.168.0.49"
 
+# Hôtes autonomes : machines hors Proxmox (VPS…), jointes directement par SSH avec un
+# compte dédié qui ne peut lancer que le wrapper (sudo). Même clé et même known_hosts que
+# les nœuds. Pas de snapshot ni de retour arrière : confirmation renforcée (nom à saisir),
+# hors lots et hors sécurité automatique. Installation : docs/HOTE-AUTONOME.md.
+# [[host]]
+# name = "vps"                          # nom affiché (minuscules, chiffres, tirets)
+# address = "vps.example.org:2222"      # hôte:port (22 par défaut)
+# user = "patchwarden"                  # compte dédié (root refusé)
+# tags = ["cloud"]                      # facultatif : fenêtres de maintenance, filtres
+
 [jobs]
 data_dir = "/var/lib/patchwarden"   # historique des tâches et dernières détections
 max_parallel = 2                    # tâches simultanées (toujours une seule par invité)

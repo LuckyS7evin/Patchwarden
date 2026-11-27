@@ -24,7 +24,7 @@ type Source interface {
 // Guest est un invité tel que l'affiche PatchWarden.
 type Guest struct {
 	Node     string
-	Type     string // "lxc" ou "qemu"
+	Type     string // "lxc", "qemu" ou "host" (hôte autonome)
 	VMID     int
 	Name     string
 	Status   string
@@ -45,13 +45,30 @@ type Guest struct {
 // Key identifie un invité de façon unique.
 func (g Guest) Key() string { return g.Node + "/" + strconv.Itoa(g.VMID) }
 
-// TypeLabel renvoie « LXC » ou « VM ».
+// TypeLabel renvoie « LXC », « VM » ou « Hôte ».
 func (g Guest) TypeLabel() string {
-	if g.Type == "lxc" {
+	switch g.Type {
+	case "lxc":
 		return "LXC"
+	case TypeHost:
+		return "Hôte"
 	}
 	return "VM"
 }
+
+// Where situe l'invité : « LXC 104 · loki », ou « hôte autonome ».
+func (g Guest) Where() string {
+	if g.IsHost() {
+		return "hôte autonome"
+	}
+	return g.TypeLabel() + " " + strconv.Itoa(g.VMID) + " · " + g.Node
+}
+
+// IsHost indique un hôte autonome (machine hors Proxmox, [[host]]).
+func (g Guest) IsHost() bool { return g.Type == TypeHost }
+
+// Managed indique un type pris en charge : LXC, VM ou hôte autonome.
+func (g Guest) Managed() bool { return g.Type == "lxc" || g.Type == "qemu" || g.Type == TypeHost }
 
 // StorageStat est un stockage local d'un nœud pouvant accueillir des disques
 // d'invités (contenu rootdir ou images).
@@ -123,11 +140,13 @@ type Snapshot struct {
 	NodeStats map[string]NodeStat
 }
 
-// Nodes renvoie les nœuds présents, triés.
+// Nodes renvoie les nœuds Proxmox présents, triés (sans les hôtes autonomes).
 func (s Snapshot) Nodes() []string {
 	set := map[string]bool{}
 	for _, g := range s.Guests {
-		set[g.Node] = true
+		if !g.IsHost() {
+			set[g.Node] = true
+		}
 	}
 	for n := range s.NodeStats {
 		set[n] = true
@@ -229,7 +248,10 @@ func (s *Service) Refresh(ctx context.Context) {
 		if r.err != nil {
 			next.Errors[r.name] = r.err.Error()
 			s.log.Warn("inventaire : point d'accès en erreur", "point", r.name, "erreur", r.err)
-			continue
+			// Un hôte autonome injoignable reste affiché, en état inconnu.
+			if len(r.res) != 1 || r.res[0].Type != TypeHost {
+				continue
+			}
 		}
 		for _, res := range r.res {
 			switch res.Type {
@@ -253,7 +275,7 @@ func (s *Service) Refresh(ctx context.Context) {
 				}
 				next.NodeStats[res.Node] = st
 				continue
-			case "lxc", "qemu":
+			case "lxc", "qemu", TypeHost:
 			default:
 				continue
 			}
@@ -310,6 +332,10 @@ func (s *Service) classify(r proxmox.Resource) Guest {
 		g.Tags = append(g.Tags, strings.ToLower(t))
 	}
 	g.CommunityScript = g.Type == "lxc" && hasTag(g.Tags, s.policy.CommunityScriptTag)
+	if g.Type == TypeHost {
+		g.Critical, g.CriticalReason = true, "hôte autonome : ni snapshot ni retour arrière"
+		return g
+	}
 	for _, t := range s.policy.CriticalTags {
 		if hasTag(g.Tags, t) {
 			g.Critical, g.CriticalReason = true, "tag « "+strings.ToLower(t)+" »"

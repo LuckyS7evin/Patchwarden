@@ -36,6 +36,21 @@ type Server struct {
 	mu         sync.Mutex
 	listener   net.Listener
 	authorized ssh.PublicKey
+	users      []string
+}
+
+// Trust remplace la clé cliente acceptée (un même client pour plusieurs serveurs).
+func (s *Server) Trust(key ssh.PublicKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorized = key
+}
+
+// Users renvoie les comptes utilisés par les connexions acceptées.
+func (s *Server) Users() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.users...)
 }
 
 // Start démarre un serveur qui n'accepte que la clé cliente générée.
@@ -59,8 +74,11 @@ func start(t *testing.T, h Handler, multi bool) *Server {
 	}
 	s := &Server{HostKey: hostSigner.PublicKey(), ClientKey: cliSigner, ClientPriv: cliPriv, authorized: cliSigner.PublicKey()}
 	cfg := &ssh.ServerConfig{
-		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		PublicKeyCallback: func(md ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
 			if bytes.Equal(key.Marshal(), s.authorized.Marshal()) {
+				s.users = append(s.users, md.User())
 				return nil, nil
 			}
 			return nil, io.EOF

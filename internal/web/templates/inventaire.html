@@ -32,7 +32,7 @@
       {{with .Filter.View}}<input type="hidden" name="vue" value="{{.}}">{{end}}
       {{with .Filter.Q}}<input type="hidden" name="q" value="{{.}}">{{end}}
       <select name="noeud" aria-label="Nœud"><option value="">tous les nœuds</option>{{range .Nodes}}<option value="{{.}}"{{if eq . $.Filter.Node}} selected{{end}}>{{.}}</option>{{end}}</select>
-      <select name="type" aria-label="Type"><option value="">LXC et VM</option><option value="lxc"{{if eq .Filter.Type "lxc"}} selected{{end}}>LXC</option><option value="qemu"{{if eq .Filter.Type "qemu"}} selected{{end}}>VM</option></select>
+      <select name="type" aria-label="Type"><option value="">Tous les types</option><option value="lxc"{{if eq .Filter.Type "lxc"}} selected{{end}}>LXC</option><option value="qemu"{{if eq .Filter.Type "qemu"}} selected{{end}}>VM</option><option value="host"{{if eq .Filter.Type "host"}} selected{{end}}>Hôtes autonomes</option></select>
       {{if .OSes}}<select name="os" aria-label="Système"><option value="">tous les OS</option>{{range .OSes}}<option value="{{.}}"{{if eq . $.Filter.OS}} selected{{end}}>{{.}}</option>{{end}}</select>{{end}}
       {{if .Tags}}<select name="tag" aria-label="Tag"><option value="">tous les tags</option>{{range .Tags}}<option value="{{.}}"{{if eq . $.Filter.Tag}} selected{{end}}>{{.}}</option>{{end}}</select>{{end}}
       <button type="submit" class="btn s" data-auto-btn>Filtrer</button>
@@ -53,12 +53,12 @@
           {{if and .Sec .Upd}} · {{end}}{{if .Upd}}<a href="/lot?tag={{.Node}}&amp;op=complet">tout ({{.Upd}})</a>{{end}}</span>{{end}}{{end}}</td></tr>
       {{range .Rows}}
       <tr data-apercu="/invites/{{.Node}}/{{.VMID}}/apercu" data-fiche="/invites/{{.Node}}/{{.VMID}}"{{if .Stale}} class="stale"{{end}}>
-        <td><div class="tn"><img class="ic" src="{{.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a><span class="id">{{.VMID}}</span>
+        <td><div class="tn"><img class="ic" src="{{.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Node}}/{{.VMID}}">{{if .Name}}{{.Name}}{{else}}<em>(nom indisponible)</em>{{end}}</a>{{if not .IsHost}}<span class="id">{{.VMID}}</span>{{end}}
           {{- if .Critical}}<span class="b c" title="Motif : {{.CriticalReason}}">critique</span>{{end}}
           {{- if .Template}}<span class="b">modèle</span>{{end}}
           {{- if .Lock}}<span class="b w">verrou : {{.Lock}}</span>{{end}}
           {{- if .Stale}}<span class="b w">nœud injoignable</span>{{end}}</div></td>
-        <td>{{if eq .Type "qemu"}}VM{{else if eq .Type "lxc"}}LXC{{else}}{{.Type}}{{end}}</td>
+        <td>{{.TypeLabel}}</td>
         <td class="small">{{with .OSName}}{{.}}{{else}}<span class="muted">—</span>{{end}}</td>
         <td>{{template "statut" .}}</td>
         <td class="upd">{{template "maj" .}}</td>

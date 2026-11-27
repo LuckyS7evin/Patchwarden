@@ -68,6 +68,10 @@ type Engine struct {
 	Guests  func() []inventory.Guest
 	// Auto : sécurité automatique (désactivée par défaut).
 	Auto AutoConfig
+	// HostBack : attente maximale du retour d'un hôte autonome après son
+	// redémarrage (défaut 10 min) ; HostPoll : intervalle entre deux essais
+	// (défaut 15 s).
+	HostBack, HostPoll time.Duration
 }
 
 // OSSupport renvoie l'état du support du système d'un invité détecté.
@@ -84,6 +88,7 @@ var (
 	ErrUnknown     = errors.New("état inconnu : le nœud ne publie pas l'état de ses invités (vérifiez pvestatd sur le nœud)")
 	ErrTemplate    = errors.New("modèle : aucune action")
 	ErrStaleNode   = errors.New("nœud injoignable lors du dernier inventaire")
+	ErrHostDown    = errors.New("hôte injoignable lors du dernier inventaire (SSH ou wrapper) : voir l'erreur en haut de l'inventaire")
 	exitRefused    = 2
 	exitNotRunning = 3
 	exitBusy       = 99
@@ -92,7 +97,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 13
+const WrapperVersion = 14
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {
@@ -101,8 +106,10 @@ func (e *Engine) CanDetect(g inventory.Guest) error {
 		return ErrNoSSH
 	case g.Template:
 		return ErrTemplate
-	case g.Type != "lxc" && g.Type != "qemu":
+	case !g.Managed():
 		return ErrNotLXC
+	case g.IsHost() && g.Status != "running":
+		return ErrHostDown
 	case g.Status == "unknown" || g.Status == "":
 		return ErrUnknown
 	case g.Status != "running":
@@ -159,7 +166,11 @@ func (e *Engine) detectRun(ctx context.Context, g inventory.Guest, jobID string,
 		refresh = "1"
 	}
 	cmd := fmt.Sprintf("%s %d %s", verb(g, "detect"), g.VMID, refresh)
-	log(false, fmt.Sprintf("▶ %s · CT %d (%s) sur %s", cmd, g.VMID, g.Name, g.Node))
+	if g.IsHost() {
+		log(false, fmt.Sprintf("▶ %s · hôte autonome %s", cmd, g.Name))
+	} else {
+		log(false, fmt.Sprintf("▶ %s · %s %d (%s) sur %s", cmd, guestNoun(g), g.VMID, g.Name, g.Node))
+	}
 	if e.AptRefresh {
 		log(false, "  (apt-get update est lancé dans l'invité : il rafraîchit l'index des paquets, sans rien installer)")
 	}
@@ -370,10 +381,13 @@ func summarize(r detect.Result) string {
 	return strings.Join(parts, " · ")
 }
 
-// verb compose le verbe du wrapper selon le type d'invité (lxc-… ou vm-…).
+// verb compose le verbe du wrapper selon le type d'invité (lxc-…, vm-… ou host-…).
 func verb(g inventory.Guest, base string) string {
-	if g.Type == "qemu" {
+	switch g.Type {
+	case "qemu":
 		return "vm-" + base
+	case inventory.TypeHost:
+		return "host-" + base
 	}
 	return "lxc-" + base
 }

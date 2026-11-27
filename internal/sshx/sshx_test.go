@@ -141,7 +141,7 @@ func TestKnownHostsFileMessages(t *testing.T) {
 		}
 		cfg := config.SSH{User: "root", KeyFile: keyFile, KnownHosts: kh, Nodes: map[string]string{"loki": srv.Addr}}
 		cfg.ConnectTimeout.Duration = 5 * time.Second
-		e, err := New(cfg)
+		e, err := New(cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,7 @@ func TestKnownHostsWithSeveralHostKeys(t *testing.T) {
 
 	for name, key := range map[string]ssh.PublicKey{"ed25519": srv.HostKey, "ecdsa": srv.ExtraHostKey, "rsa": srv.RSAHostKey} {
 		_ = os.WriteFile(kh, []byte(knownhosts.Line([]string{srv.Addr}, key)+"\n"), 0o600)
-		e, err := New(cfg)
+		e, err := New(cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,7 +192,7 @@ func TestKnownHostsWithSeveralHostKeys(t *testing.T) {
 	_, other, _ := ed25519.GenerateKey(rand.Reader)
 	otherPub, _ := ssh.NewPublicKey(other.Public())
 	_ = os.WriteFile(kh, []byte(knownhosts.Line([]string{srv.Addr}, otherPub)+"\n"), 0o600)
-	e, _ := New(cfg)
+	e, _ := New(cfg, nil)
 	if _, err := e.Run(context.Background(), "loki", "ping", func(Line) {}); err == nil || !strings.Contains(err.Error(), "DIFFÉRENTE") {
 		t.Errorf("clé usurpée acceptée : %v", err)
 	}

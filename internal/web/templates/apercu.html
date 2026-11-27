@@ -2,7 +2,7 @@
 {{with .Row}}
 <div class="dh">
   <img class="ic md" src="{{.Icon}}" alt="" width="44" height="44">
-  <div><h2>{{if .Name}}{{.Name}}{{else}}(nom indisponible){{end}}</h2><div class="muted">{{.TypeLabel}} {{.VMID}} · {{.Node}}{{with .Det}} · {{.OSPretty}}{{end}}</div></div>
+  <div><h2>{{if .Name}}{{.Name}}{{else}}(nom indisponible){{end}}</h2><div class="muted">{{.Where}}{{with .Det}} · {{.OSPretty}}{{end}}</div></div>
   <button type="button" class="x" data-fermer aria-label="Fermer l'aperçu">×</button>
 </div>
 {{end}}

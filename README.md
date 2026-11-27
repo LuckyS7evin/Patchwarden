@@ -20,6 +20,7 @@ de mémoire, sans agent dans les invités.
 | 8 | Docker : stacks Portainer (API), projets docker compose, comparaison aux registres | ✅ (à recetter) |
 | 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique (désactivée par défaut), métriques Prometheus | ✅ (à recetter) |
 | 10 | Invités arrêtés (démarrer, mettre à jour, arrêter), nettoyage des images Docker, images Docker dans les notifications, procédure de migration VLAN | ✅ (à recetter) |
+| 11 | Hôtes autonomes (VPS hors Proxmox, SSH sur port quelconque, compte dédié + sudo limité au wrapper) | ✅ (à recetter) |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -427,6 +428,19 @@ message « applis ».
 **Sécurité** : modèle de menace, protections, risques acceptés et recommandations dans
 [docs/SECURITE.md](docs/SECURITE.md).
 
+### 11. Hôtes autonomes : VPS hors Proxmox (facultatif)
+
+Une machine hors Proxmox (VPS) se déclare dans une section `[[host]]` : nom, adresse
+`hôte:port` (port SSH quelconque), compte (`patchwarden` par défaut, root refusé). PatchWarden
+s'y connecte avec la même clé et le même `known_hosts` que pour les nœuds, sur un **compte
+dédié** qui ne peut lancer que le wrapper, en root, par sudo et sans argument. Mêmes détection
+et mises à jour qu'un invité (apt, services, Docker), mais ni snapshot ni retour arrière :
+confirmation renforcée à chaque fois, hors lots et hors sécurité automatique. Le wrapper refuse
+ces verbes sur un nœud Proxmox.
+
+Installation pas à pas (compte, sudoers, clé, `known_hosts` avec le port) :
+[docs/HOTE-AUTONOME.md](docs/HOTE-AUTONOME.md).
+
 ### Mettre à jour PatchWarden
 
 Aide-mémoire complet (PatchWarden, wrapper, vérification, problèmes courants) :
@@ -458,18 +472,20 @@ le wrapper est trop ancien.
 | :--- | :--- | :--- | :--- |
 | Jeton API `patchwarden@pve!inventaire` | Inventaire, état des nœuds et des stockages (`/cluster/resources`) ; liste des snapshots d'un invité (`/nodes/<nœud>/<lxc\|qemu>/<id>/snapshot`), pour que les pages suivent un snapshot supprimé ou restauré hors de PatchWarden | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
 | Clé SSH vers root des nœuds, **commande forcée** | Verbes du wrapper | Une seule commande possible (le wrapper), depuis la seule IP de PatchWarden, `restrict` : ni terminal, ni redirection de ports, ni agent | Jalon 2 |
+| Clé SSH vers le compte `patchwarden` d'un hôte autonome ([[host]]), **commande forcée** | Verbes `host-*` du wrapper | Compte sans mot de passe ; `command="sudo -n …wrapper"`, `from=` (IP publique), `restrict` ; sudoers : le wrapper seul, en root, sans argument, seule `SSH_ORIGINAL_COMMAND` transmise | Jalon 11 |
 | Jeton GitHub (facultatif) | Dernières versions des applis | Aucun droit : lecture des dépôts publics | Jalon 2 |
 | Registres d'images | Empreinte actuelle d'un tag, liste des tags | Aucun compte : jeton anonyme en lecture, dépôts publics seulement | Jalon 8 |
 | Jeton d'accès Portainer (facultatif) | Liste des environnements, conteneurs et stacks ; re-déploiement d'une stack | Ceux de l'utilisateur Portainer du jeton : accès aux environnements concernés et aux stacks à mettre à jour. PatchWarden n'appelle que `GET /endpoints`, `GET /endpoints/{id}/docker/containers/json`, `GET /stacks`, `GET /stacks/{id}`, `GET /stacks/{id}/file`, `PUT /stacks/{id}` et `PUT /stacks/{id}/git/redeploy` | Jalon 8 |
 
 Le wrapper n'accepte qu'un vocabulaire fixe ; tout le reste est refusé (code 2) et journalisé.
-Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. PatchWarden
+Sur un nœud, il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte ; les
+verbes `host-*` (hôte autonome, la machine elle-même) y sont refusés. PatchWarden
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v13) | Effet |
+| Verbe (wrapper v14) | Effet |
 | :--- | :--- |
-| `ping` | Aucun (version du wrapper, nom du nœud) |
+| `ping` | Aucun (version du wrapper, nom de la machine, version de Proxmox, identifiant de démarrage) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
 | `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
 | `lxc-apt <vmid> <security\|full> <0\|1>` | `apt-get update` puis `apt-get --with-new-pkgs upgrade` (dépôts `*-security` seuls en mode `security`). `1` = simulation (`apt-get -s`), rien n'est modifié |
@@ -484,6 +500,7 @@ le wrapper, relisible sur le nœud.
 | `lxc-shutdown <vmid>` | `pct shutdown --timeout 180` : arrêt propre, jamais forcé ; en cas d'échec, le CT reste démarré (code 55) |
 | `lxc-docker-prune <vmid> <0\|1>` | Dans l'invité : `docker image prune -f`, images sans nom seulement (anciennes versions), jamais une image avec un nom. `1` = liste seule |
 | `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose`, `vm-start`, `vm-shutdown`, `vm-docker-prune` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (dossier créé par `mktemp -d` dans `/var/tmp`, supprimé à la fin) et journal relu toutes les 2 s |
+| `host-detect`, `host-apt`, `host-restart-services`, `host-reboot`, `host-docker-compose`, `host-docker-prune` | Hôte autonome (identifiant `0`) : mêmes arguments et mêmes scripts, exécutés sur la machine elle-même. **Refusés sur un nœud Proxmox.** `host-reboot` : `systemd-run --on-active=5 systemctl reboot`, puis PatchWarden attend un nouvel identifiant de démarrage. Ni snapshot, ni démarrage, ni arrêt |
 | Modes de `*-apt` | `security`, `full`, et pour les produits particuliers `dist` (PBS : `apt-get dist-upgrade`) et `omv` (OpenMediaVault : `omv-upgrade`) ; ces deux modes refusent toute mise à jour qui supprimerait un paquet (code 22) |
 
 La détection lit aussi les services systemd en échec (`systemctl list-units --state=failed`)

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -165,6 +166,15 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	var ex *sshx.Executor
+	if cfg.SSHEnabled() {
+		if ex, err = sshx.New(cfg.SSH, cfg.Hosts); err != nil {
+			return err
+		}
+		for _, h := range cfg.Hosts {
+			srcs = append(srcs, inventory.HostSource{Host: h, Runner: ex})
+		}
+	}
 	inv := inventory.New(srcs, cfg.Policy, cfg.Inventory.Timeout.Duration, log)
 
 	jm, err := jobs.New(cfg.Jobs.DataDir, cfg.Jobs.MaxParallel, cfg.Jobs.Retention, log)
@@ -264,14 +274,10 @@ func serve(args []string) error {
 		}
 		return nil, last
 	}
-	if cfg.SSH.Enabled() {
-		ex, err := sshx.New(cfg.SSH)
-		if err != nil {
-			return err
-		}
+	if ex != nil {
 		eng.Runner, eng.HasNode = ex, ex.HasNode
 	} else {
-		log.Warn("aucune section [ssh.nodes] : PatchWarden reste en lecture seule (ni détection ni action)")
+		log.Warn("ni [ssh.nodes] ni [[host]] : PatchWarden reste en lecture seule (ni détection ni action)")
 	}
 	sched := schedule.New(cfg.Schedule.DetectAt, func(ctx context.Context) {
 		snap, _ := inv.Current()
@@ -358,13 +364,23 @@ func checkConfig(args []string) error {
 		}
 		fmt.Printf("  ✔ %s : %d invités sur %d nœud(s) %v\n", s.Name(), total, len(nodes), nodes)
 	}
-	if cfg.SSH.Enabled() {
-		ex, err := sshx.New(cfg.SSH)
+	if cfg.SSHEnabled() {
+		ex, err := sshx.New(cfg.SSH, cfg.Hosts)
 		if err != nil {
 			return err
 		}
-		fmt.Println("Nœuds SSH (wrapper) :")
+		targets := make([]string, 0, len(cfg.SSH.Nodes)+len(cfg.Hosts))
 		for node := range cfg.SSH.Nodes {
+			targets = append(targets, node)
+		}
+		sort.Strings(targets)
+		isHost := map[string]bool{}
+		for _, h := range cfg.Hosts {
+			targets = append(targets, h.Name)
+			isHost[h.Name] = true
+		}
+		fmt.Println("Nœuds et hôtes autonomes SSH (wrapper) :")
+		for _, node := range targets {
 			ctx, cancel := context.WithTimeout(context.Background(), cfg.SSH.ConnectTimeout.Duration+5*time.Second)
 			var out []string
 			code, err := ex.Run(ctx, node, "ping", func(l sshx.Line) { out = append(out, l.Text) })
@@ -388,10 +404,20 @@ func checkConfig(args []string) error {
 					failed++
 					fmt.Printf("    ✘ wrapper version %d sur %s, version %d attendue : réinstallez deploy/patchwarden-wrapper (README, étape 6)\n", v, node, engine.WrapperVersion)
 				}
+				pve := ""
+				for _, l := range out {
+					if p, ok := strings.CutPrefix(l, "pw.pve="); ok {
+						pve = strings.TrimSpace(p)
+					}
+				}
+				if isHost[node] && pve != "" {
+					failed++
+					fmt.Printf("    ✘ %s est déclaré en [[host]] mais c'est un nœud Proxmox (%s) : retirez-le de [[host]]\n", node, pve)
+				}
 			}
 		}
 	} else {
-		fmt.Println("Pas de section [ssh.nodes] : lecture seule.")
+		fmt.Println("Ni [ssh.nodes] ni [[host]] : lecture seule.")
 	}
 	if len(cfg.Portainer) > 0 {
 		fmt.Println("Portainer :")

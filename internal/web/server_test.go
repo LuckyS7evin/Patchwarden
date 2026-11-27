@@ -1390,3 +1390,29 @@ func TestCycleAndPruneUI(t *testing.T) {
 		t.Errorf("nettoyage : %s", resp.Header.Get("Location"))
 	}
 }
+
+func TestHostPages(t *testing.T) {
+	h := newHarness(t)
+	h.inv.snap.Guests = append(h.inv.snap.Guests, inventory.Guest{Node: "vps", Type: inventory.TypeHost, VMID: 0, Name: "vps", Status: "running", Critical: true, CriticalReason: "hôte autonome : ni snapshot ni retour arrière"})
+	h.srv.cfg.Hosts = []config.Host{{Name: "vps", Address: "203.0.113.10:2222", User: "patchwarden"}}
+	h.login()
+	_, inv := h.do("GET", "/inventaire", nil, nil)
+	if !strings.Contains(inv, "Hôtes autonomes · 1 invité(s)") || !strings.Contains(inv, `href="/invites/vps/0"`) || !strings.Contains(inv, `<option value="host"`) {
+		t.Errorf("inventaire sans le groupe des hôtes autonomes")
+	}
+	resp, page := h.do("GET", "/invites/vps/0", nil, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("fiche de l'hôte : %d", resp.StatusCode)
+	}
+	for _, want := range []string{`<a href="/inventaire?type=host">Hôtes autonomes</a>`, "hôte autonome", "confirmation renforcée", "Vérification après une opération"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("fiche de l'hôte sans %q", want)
+		}
+	}
+	if strings.Contains(page, "onglet=snapshots") || strings.Contains(page, "Hôte 0") {
+		t.Errorf("fiche de l'hôte : onglet Snapshots ou identifiant 0 affiché")
+	}
+	if _, set := h.do("GET", "/reglages", nil, nil); !strings.Contains(set, "[[host]] vps") || !strings.Contains(set, "patchwarden@203.0.113.10:2222") {
+		t.Errorf("réglages sans l'hôte autonome")
+	}
+}

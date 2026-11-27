@@ -68,7 +68,15 @@ func (e *Engine) snapConfig() SnapConfig {
 }
 
 // planSnapshot remplit p.Snap à partir de la dernière détection.
+// ErrHostNoSnap : pas de snapshot sur un hôte autonome (hors Proxmox).
+var ErrHostNoSnap = errors.New("hôte autonome : pas de snapshot ni de retour arrière possibles (hors Proxmox)")
+
 func (e *Engine) planSnapshot(p *Plan, det detect.Result) {
+	if p.Guest.IsHost() {
+		p.Snap = SnapPlan{Why: ErrHostNoSnap.Error() + " ; ayez une sauvegarde récente, ou un snapshot pris chez l'hébergeur"}
+		p.Warnings = append(p.Warnings, "aucun retour arrière possible sur un hôte autonome : vérifiez d'avoir une sauvegarde récente (ou un snapshot chez l'hébergeur) avant de continuer")
+		return
+	}
 	cfg := e.snapConfig()
 	sp := SnapPlan{Name: snapName(time.Now(), p.Action), Binds: det.Snap.Binds}
 	major := false
@@ -203,6 +211,8 @@ func (e *Engine) CanSnapAction(g inventory.Guest) error {
 		return ErrNoSSH
 	case g.Template:
 		return ErrTemplate
+	case g.IsHost():
+		return ErrHostNoSnap
 	case g.Type != "lxc" && g.Type != "qemu":
 		return ErrNotLXC
 	case g.Stale:

@@ -20,6 +20,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/registry"
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 // Engine porte les dépendances.
@@ -59,6 +60,12 @@ type Engine struct {
 	ListSnapshots SnapLister
 	// Checks : adresse de vérification HTTP de chaque invité (facultatif).
 	Checks *PrefStore
+	// Windows : fenêtres de maintenance ; Guests : inventaire courant (lots
+	// programmés, sécurité automatique).
+	Windows []window.Window
+	Guests  func() []inventory.Guest
+	// Auto : sécurité automatique (désactivée par défaut).
+	Auto AutoConfig
 }
 
 // OSSupport renvoie l'état du support du système d'un invité détecté.

@@ -20,6 +20,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -39,6 +40,10 @@ type fakeEngine struct {
 	store               *detect.Store
 	dockerKeys          []string
 	checks              map[string]string
+	windows             []window.Window
+	scheduled           string
+	cancelled           string
+	auto                bool
 }
 
 func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
@@ -226,6 +231,39 @@ func (f *fakeEngine) ExecuteDocker(g inventory.Guest, keys []string, dry bool, u
 }
 
 func (f *fakeEngine) SyncSnapshots([]inventory.Guest) {}
+
+func (f *fakeEngine) ScheduleBatch(reqs []engine.BatchRequest, stop bool, user, w string) (engine.Batch, error) {
+	f.batch, f.batchStop, f.scheduled = reqs, stop, w
+	return engine.Batch{ID: "lot-prog", Status: engine.BatchScheduled, Window: w}, nil
+}
+
+func (f *fakeEngine) CancelBatch(id, user string) error {
+	f.cancelled = id
+	return nil
+}
+
+func (f *fakeEngine) WindowFor(g inventory.Guest, now time.Time) engine.WindowStatus {
+	var st engine.WindowStatus
+	for _, w := range f.windows {
+		if w.Applies(g.Tags) {
+			st.Covered = true
+			st.Open = st.Open || w.Open(now)
+			st.Next, st.NextAt = w, now.Add(time.Hour)
+		}
+	}
+	return st
+}
+
+func (f *fakeEngine) MaintenanceWindows() []window.Window { return f.windows }
+
+func (f *fakeEngine) NextAuto(now time.Time) time.Time {
+	if f.auto {
+		return now.Add(2 * time.Hour)
+	}
+	return time.Time{}
+}
+
+func (f *fakeEngine) AutoCandidates() []inventory.Guest { return nil }
 
 func (f *fakeEngine) CheckURL(key string) string { return f.checks[key] }
 
@@ -1222,5 +1260,41 @@ func TestCheckURLSetting(t *testing.T) {
 	}
 	if resp, _ := h.do("POST", "/invites/loki/104/verification", url.Values{"csrf": {tok}, "url": {"ftp://x"}}, nil); !strings.Contains(resp.Header.Get("Location"), "erreur=") {
 		t.Error("adresse invalide acceptée")
+	}
+}
+
+func TestMaintenanceUI(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, Apt: detect.Apt{Present: true, Total: 3, Security: 2, SecurityStrict: 2}})
+	w, _ := window.New("nuit", []string{"dim"}, "03:00", 2*time.Hour, nil)
+	h.eng.windows = []window.Window{w}
+	h.eng.auto = true
+	h.srv.cfg.Maintenance = []config.Maintenance{{Name: "nuit"}}
+	h.srv.cfg.AutoSecurity = config.AutoSecurity{Enabled: true, Tag: "auto-securite", Window: "nuit"}
+
+	_, page := h.do("GET", "/lot?sel=loki/104:securite", nil, nil)
+	for _, want := range []string{"Programmer le lot", `<option value="nuit">`, "hors fenêtre de maintenance"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("préparation du lot sans %q", want)
+		}
+	}
+	tok := h.csrf()
+	form := url.Values{"csrf": {tok}, "cle_0": {"loki/104"}, "op_0": {"securite"}, "garder_0": {"1"}, "arret": {"1"}, "mode": {"programmer"}, "fenetre": {"nuit"}, "confirme": {"1"}}
+	resp, _ := h.do("POST", "/lot", form, nil)
+	if resp.Header.Get("Location") != "/lots/lot-prog" || h.eng.scheduled != "nuit" || len(h.eng.batch) != 1 {
+		t.Fatalf("programmation : %s %q", resp.Header.Get("Location"), h.eng.scheduled)
+	}
+	if resp, _ := h.do("POST", "/lots/lot-prog/annuler", url.Values{"csrf": {tok}}, nil); resp.StatusCode != http.StatusSeeOther || h.eng.cancelled != "lot-prog" {
+		t.Error("annulation du lot programmé")
+	}
+	_, reg := h.do("GET", "/reglages", nil, nil)
+	for _, want := range []string{"Maintenance", "[[maintenance]] nuit", "dim 03:00, 2h", "auto_security", "activée"} {
+		if !strings.Contains(reg, want) {
+			t.Errorf("réglages sans %q", want)
+		}
+	}
+	if _, todo := h.do("GET", "/", nil, nil); !strings.Contains(todo, "sécurité automatique") {
+		t.Error("« À traiter » : prochaine sécurité automatique absente")
 	}
 }

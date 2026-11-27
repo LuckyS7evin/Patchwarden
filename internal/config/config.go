@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 // Duration accepte en TOML une chaîne comme "5m" ou "12h".
@@ -54,7 +56,34 @@ type Config struct {
 	EOL       EOL         `toml:"eol"`
 	Docker    Docker      `toml:"docker"`
 	Portainer []Portainer `toml:"portainer"`
-	Notify    []Notify    `toml:"notify"`
+	// Maintenance : fenêtres de maintenance (lots programmés, sécurité automatique).
+	Maintenance []Maintenance `toml:"maintenance"`
+	// AutoSecurity : « Sécurité uniquement » appliqué seul dans une fenêtre.
+	AutoSecurity AutoSecurity `toml:"auto_security"`
+	Notify       []Notify     `toml:"notify"`
+}
+
+// Maintenance est une fenêtre de maintenance hebdomadaire.
+type Maintenance struct {
+	Name     string   `toml:"name"`
+	Days     []string `toml:"days"` // lun … dim ; vide : tous les jours
+	Start    string   `toml:"start"`
+	Duration Duration `toml:"duration"`
+	// Tags : invités concernés (avertissement hors fenêtre) ; vide : tous.
+	Tags []string `toml:"tags"`
+}
+
+// AutoSecurity règle la sécurité automatique. Désactivée par défaut : rien
+// n'est jamais appliqué sans confirmation tant que enabled vaut false.
+type AutoSecurity struct {
+	Enabled bool `toml:"enabled"`
+	// Tag : seuls les invités portant ce tag sont concernés (défaut : auto-securite).
+	Tag string `toml:"tag"`
+	// Window : nom de la fenêtre [[maintenance]] pendant laquelle elle s'exécute.
+	Window string `toml:"window"`
+	// Snapshot : snapshot avant chaque mise à jour (défaut : true) ; un invité
+	// dont le snapshot est impossible est alors ignoré.
+	Snapshot *bool `toml:"snapshot"`
 }
 
 // Docker règle le suivi des conteneurs.
@@ -341,6 +370,13 @@ func (c *Config) applyDefaults() {
 	if c.UI.IconBase == "" {
 		c.UI.IconBase = "https://cdn.jsdelivr.net/gh/selfhst/icons/webp"
 	}
+	if c.AutoSecurity.Tag == "" {
+		c.AutoSecurity.Tag = "auto-securite"
+	}
+	if c.AutoSecurity.Snapshot == nil {
+		t := true
+		c.AutoSecurity.Snapshot = &t
+	}
 	if c.Docker.RegistryCheck == nil {
 		t := true
 		c.Docker.RegistryCheck = &t
@@ -545,6 +581,31 @@ func (c *Config) Validate() error {
 			if _, err := os.Stat(p.CAFile); err != nil {
 				add("portainer %s : ca_file illisible : %v", label, err)
 			}
+		}
+	}
+	windows := map[string]bool{}
+	for i, m := range c.Maintenance {
+		label := m.Name
+		if label == "" {
+			label = fmt.Sprintf("n° %d", i+1)
+		}
+		if !nameRe.MatchString(m.Name) {
+			add("maintenance %s : name doit être court, en minuscules, chiffres et tirets", label)
+		}
+		if windows[m.Name] {
+			add("maintenance %s : nom en double", label)
+		}
+		windows[m.Name] = true
+		if _, err := window.New(m.Name, m.Days, m.Start, m.Duration.Duration, m.Tags); err != nil {
+			add("maintenance %s : %v", label, err)
+		}
+	}
+	if c.AutoSecurity.Enabled {
+		if c.AutoSecurity.Window == "" || !windows[c.AutoSecurity.Window] {
+			add("auto_security.window : nom d'une section [[maintenance]] attendu, obtenu %q", c.AutoSecurity.Window)
+		}
+		if strings.TrimSpace(c.AutoSecurity.Tag) == "" {
+			add("auto_security.tag ne peut pas être vide")
 		}
 	}
 	if c.Docker.CacheTTL.Duration < time.Minute {

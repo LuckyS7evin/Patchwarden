@@ -1,15 +1,26 @@
 {{define "content"}}
 <div class="content">
+{{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
 {{with .Batch}}
   <p class="crumbs"><a href="/taches">Tâches</a> › {{.ID}}</p>
   <div class="pagehead">
     <div>
       <h1>{{if .DryRun}}Lot simulé{{else}}Lot{{end}} · {{len .Items}} opération(s)</h1>
-      <p class="sub">demandé par {{.By}} le {{date .CreatedAt}} · une opération à la fois{{if .StopOnFail}} · arrêt au premier échec{{end}}{{if not .EndedAt.IsZero}} · terminé à {{clock .EndedAt}}{{end}}</p>
+      <p class="sub">{{if .Auto}}sécurité automatique{{else}}demandé par {{.By}}{{end}} le {{date .CreatedAt}} · une opération à la fois{{if .StopOnFail}} · arrêt au premier échec{{end}}{{if .Window}} · fenêtre « {{.Window}} » du {{date .ScheduledAt}} au {{clock .Until}}{{end}}{{if not .EndedAt.IsZero}} · terminé à {{clock .EndedAt}}{{end}}</p>
     </div>
     <span class="sp"></span>
-    <span class="b {{if eq .Status "terminé"}}{{if .Count "échouée"}}w{{else}}ok{{end}}{{else if eq .Status "en cours"}}a{{else}}c{{end}}" id="statut">{{.Status}}</span>
+    <span class="b {{if eq .Status "terminé"}}{{if .Count "échouée"}}w{{else}}ok{{end}}{{else if or (eq .Status "en cours") (eq .Status "programmé")}}a{{else if eq .Status "annulé"}}{{else}}c{{end}}" id="statut">{{.Status}}</span>
   </div>
+  {{if .Scheduled}}
+  <section class="card">
+    <h2>Programmé pour le {{date .ScheduledAt}}</h2>
+    <p class="small">Fenêtre « {{.Window}} », jusqu'à {{clock .Until}}. À l'ouverture : détection des invités, plan revérifié, puis les opérations une par une.</p>
+    <form method="post" action="/lots/{{.ID}}/annuler" class="inline-form">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button type="submit" class="btn">Annuler ce lot</button>
+    </form>
+  </section>
+  {{end}}
   <div class="sum">
     <div><b>{{.Count "réussie"}}</b>réussie(s)</div>
     <div><b{{if .Count "échouée"}} class="c"{{end}}>{{.Count "échouée"}}</b>échouée(s)</div>

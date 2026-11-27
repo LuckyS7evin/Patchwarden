@@ -39,6 +39,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
 	"github.com/LuckyS7evin/patchwarden/internal/web"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 // version est fixée à la compilation : -ldflags "-X main.version=…".
@@ -212,6 +213,25 @@ func serve(args []string) error {
 		Batches:    batches,
 		EOL:        eol.New(cfg.EOL.Source, nil),
 	}
+	for _, m := range cfg.Maintenance {
+		w, err := window.New(m.Name, m.Days, m.Start, m.Duration.Duration, m.Tags)
+		if err != nil {
+			return fmt.Errorf("maintenance %s : %w", m.Name, err)
+		}
+		eng.Windows = append(eng.Windows, w)
+	}
+	eng.Guests = func() []inventory.Guest {
+		snap, _ := inv.Current()
+		return snap.Guests
+	}
+	if cfg.AutoSecurity.Enabled {
+		state, err := engine.OpenPrefs(cfg.Jobs.DataDir, "auto.json")
+		if err != nil {
+			return fmt.Errorf("sécurité automatique : %w", err)
+		}
+		eng.Auto = engine.AutoConfig{Enabled: true, Tag: cfg.AutoSecurity.Tag, Window: cfg.AutoSecurity.Window, Snapshot: *cfg.AutoSecurity.Snapshot, State: state}
+		log.Warn("sécurité automatique activée", "fenêtre", cfg.AutoSecurity.Window, "tag", cfg.AutoSecurity.Tag)
+	}
 	if *cfg.Docker.RegistryCheck {
 		eng.Registry = registry.New(cfg.Docker.CacheTTL.Duration, nil)
 	}
@@ -261,6 +281,9 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go inv.Run(ctx, cfg.Inventory.Refresh.Duration)
+	if eng.Runner != nil {
+		go eng.RunWindows(ctx)
+	}
 	if sched.Enabled() {
 		if eng.Runner == nil {
 			log.Warn("détection planifiée ignorée : pas d'accès SSH ([ssh.nodes])")

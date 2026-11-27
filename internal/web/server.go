@@ -20,6 +20,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 //go:embed templates/*.html static/*
@@ -55,6 +56,12 @@ type Engine interface {
 	SyncSnapshots(guests []inventory.Guest)
 	CheckURL(key string) string
 	SetCheckURL(key, raw string) error
+	ScheduleBatch(reqs []engine.BatchRequest, stopOnFail bool, user, windowName string) (engine.Batch, error)
+	CancelBatch(id, user string) error
+	WindowFor(g inventory.Guest, now time.Time) engine.WindowStatus
+	MaintenanceWindows() []window.Window
+	NextAuto(now time.Time) time.Time
+	AutoCandidates() []inventory.Guest
 	ExecuteDocker(g inventory.Guest, keys []string, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
 }
 
@@ -237,6 +244,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /lot", s.authed(s.batchPrepare))
 	mux.HandleFunc("POST /lot", s.sameOrigin(s.authed(s.csrf(s.batchSubmit))))
 	mux.HandleFunc("GET /lots/{id}", s.authed(s.batchPage))
+	mux.HandleFunc("POST /lots/{id}/annuler", s.sameOrigin(s.authed(s.csrf(s.batchCancel))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/redemarrage", s.authed(s.restartPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/redemarrage", s.sameOrigin(s.authed(s.csrf(s.restartSubmit))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/docker", s.authed(s.dockerPage))

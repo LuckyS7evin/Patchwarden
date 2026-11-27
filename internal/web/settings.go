@@ -1,11 +1,14 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 type setting struct{ Key, Value, Note string }
@@ -93,6 +96,32 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, se *sessio
 		dock = append(dock, setting{"portainer", "aucune instance", "stacks Portainer : détection seulement"})
 	}
 	add("Docker", dock...)
+	var maint []setting
+	for _, w := range s.deps.Engine.MaintenanceWindows() {
+		start, _ := w.Next(s.now())
+		note := "prochaine ouverture : " + window.FormatTime(start)
+		if w.Open(s.now()) {
+			note = "ouverte maintenant"
+		}
+		if len(w.Tags) > 0 {
+			note += " · invités des tags " + strings.Join(w.Tags, ", ")
+		} else {
+			note += " · tous les invités"
+		}
+		maint = append(maint, setting{"[[maintenance]] " + w.Name, w.Label(), note})
+	}
+	if len(maint) == 0 {
+		maint = append(maint, setting{"maintenance", "aucune fenêtre", "pas de lot programmé ni de sécurité automatique possible"})
+	}
+	a := c.AutoSecurity
+	if a.Enabled {
+		n := len(s.deps.Engine.AutoCandidates())
+		maint = append(maint, setting{"auto_security", "activée : fenêtre « " + a.Window + " », tag « " + a.Tag + " », snapshot " + yes(a.Snapshot == nil || *a.Snapshot),
+			fmt.Sprintf("%d invité(s) portent le tag · prochaine exécution : %s · « Sécurité uniquement » seulement, jamais les invités critiques, OMV, PBS ni celui de PatchWarden", n, window.FormatTime(s.deps.Engine.NextAuto(s.now())))})
+	} else {
+		maint = append(maint, setting{"auto_security", "désactivée", "rien n'est jamais appliqué sans confirmation"})
+	}
+	add("Maintenance", maint...)
 	sched := strings.Join(c.Schedule.DetectAt, ", ")
 	if sched == "" {
 		sched = "aucune"

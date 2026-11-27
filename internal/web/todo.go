@@ -13,6 +13,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 // StaleDetection : au-delà, une détection est signalée comme trop ancienne.
@@ -304,6 +305,9 @@ func plural(n int, one, many string) string {
 
 type todoData struct {
 	base
+	// Sécurité automatique : prochaine exécution et invités concernés.
+	AutoNext  string
+	AutoCount int
 	Todo      todo
 	Tags      []string // tags des invités présents dans la liste
 	Tag       string   // filtre courant
@@ -346,6 +350,9 @@ func (s *Server) todoPage(w http.ResponseWriter, r *http.Request, se *session) {
 		}
 	}
 	d.Todo.Groups = groups
+	if t := s.deps.Engine.NextAuto(s.now()); !t.IsZero() {
+		d.AutoNext, d.AutoCount = window.FormatTime(t), len(s.deps.Engine.AutoCandidates())
+	}
 	for t := range tags {
 		d.Tags = append(d.Tags, t)
 	}

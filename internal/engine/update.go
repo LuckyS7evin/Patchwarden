@@ -185,6 +185,9 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 	if g.Critical {
 		p.Warnings = append(p.Warnings, "invité critique ("+g.CriticalReason+") : saisissez son nom pour confirmer")
 	}
+	if w := e.outsideWindow(g); w != "" {
+		p.Warnings = append(p.Warnings, w)
+	}
 	p.Steps = append(p.Steps, "détection après la mise à jour, pour vérifier le résultat")
 	e.planSnapshot(&p, det)
 	return p

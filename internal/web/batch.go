@@ -11,6 +11,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 // maxBatch : nombre maximal d'opérations dans un lot.
@@ -27,7 +28,14 @@ type lotRow struct {
 	SnapWhy      string
 	Why          string // raison pour laquelle l'opération sera ignorée
 	Detail       string
-	Removed      bool // décochée par l'utilisateur (retour après une erreur)
+	Removed      bool   // décochée par l'utilisateur (retour après une erreur)
+	OutWindow    string // hors de sa fenêtre de maintenance : prochaine ouverture
+}
+
+// windowChoice : fenêtre proposée pour programmer un lot.
+type windowChoice struct {
+	Name, Label, Next string
+	Open              bool
 }
 
 type lotData struct {
@@ -38,6 +46,7 @@ type lotData struct {
 	Error    string
 	Back     string // page d'où vient le lot (bouton « Annuler »)
 	Stop     bool   // « arrêter au premier échec »
+	Windows  []windowChoice
 }
 
 func opChoices(op engine.Op) []engine.Op {
@@ -187,10 +196,17 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 			p := s.deps.Engine.PlanDocker(rq.Guest, nil)
 			lr.SnapPossible, lr.SnapWhy = p.Snap.Possible, p.Snap.Why
 		}
+		if st := s.deps.Engine.WindowFor(rq.Guest, s.now()); st.Covered && !st.Open {
+			lr.OutWindow = "« " + st.Next.Name + " » " + window.FormatTime(st.NextAt)
+		}
 		if lr.Why == "" {
 			d.Runnable++
 		}
 		d.Rows = append(d.Rows, lr)
+	}
+	for _, w := range s.deps.Engine.MaintenanceWindows() {
+		start, _ := w.Next(s.now())
+		d.Windows = append(d.Windows, windowChoice{Name: w.Name, Label: w.Label(), Next: window.FormatTime(start), Open: w.Open(s.now())})
 	}
 	s.render(w, "lot", http.StatusOK, d)
 }
@@ -229,12 +245,19 @@ func (s *Server) batchSubmit(w http.ResponseWriter, r *http.Request, se *session
 		keep.Set("erreur", msg)
 		http.Redirect(w, r, "/lot?"+keep.Encode(), http.StatusSeeOther)
 	}
-	dry := r.PostFormValue("mode") != "appliquer"
+	mode := r.PostFormValue("mode")
+	dry := mode != "appliquer" && mode != "programmer"
 	if !dry && r.PostFormValue("confirme") != "1" {
 		back("cochez la case de confirmation pour appliquer le lot")
 		return
 	}
-	b, err := s.deps.Engine.StartBatch(reqs, dry, r.PostFormValue("arret") == "1", se.user)
+	var b engine.Batch
+	var err error
+	if mode == "programmer" {
+		b, err = s.deps.Engine.ScheduleBatch(reqs, r.PostFormValue("arret") == "1", se.user, r.PostFormValue("fenetre"))
+	} else {
+		b, err = s.deps.Engine.StartBatch(reqs, dry, r.PostFormValue("arret") == "1", se.user)
+	}
 	if err != nil {
 		back(err.Error())
 		return
@@ -247,6 +270,7 @@ type lotsData struct {
 	base
 	Batch engine.Batch
 	Live  bool
+	Error string
 }
 
 func (s *Server) batchPage(w http.ResponseWriter, r *http.Request, se *session) {
@@ -263,7 +287,18 @@ func (s *Server) batchPage(w http.ResponseWriter, r *http.Request, se *session) 
 	if b.DryRun {
 		title = "Lot simulé"
 	}
-	s.render(w, "lots", http.StatusOK, lotsData{base: s.base(title, "taches", se), Batch: b, Live: b.Running()})
+	s.render(w, "lots", http.StatusOK, lotsData{base: s.base(title, "taches", se), Batch: b, Live: b.Running(), Error: r.URL.Query().Get("erreur")})
+}
+
+// batchCancel annule un lot programmé.
+func (s *Server) batchCancel(w http.ResponseWriter, r *http.Request, se *session) {
+	id := r.PathValue("id")
+	if err := s.deps.Engine.CancelBatch(id, se.user); err != nil {
+		http.Redirect(w, r, "/lots/"+url.PathEscape(id)+"?erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.log.Info("lot programmé annulé", "lot", id, "par", se.user)
+	http.Redirect(w, r, "/lots/"+url.PathEscape(id), http.StatusSeeOther)
 }
 
 type restartData struct {

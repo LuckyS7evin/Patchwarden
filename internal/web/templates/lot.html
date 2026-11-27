@@ -29,7 +29,7 @@
           {{$cur := .Op}}{{range .Ops}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.Label}}</option>{{end}}
         </select>
       </td>
-      <td class="small">{{if .Why}}<span class="crit">ignoré : {{.Why}}</span>{{else}}{{.Detail}}{{end}}</td>
+      <td class="small">{{if .Why}}<span class="crit">ignoré : {{.Why}}</span>{{else}}{{.Detail}}{{end}}{{with .OutWindow}}<br><span class="warn-text">hors fenêtre de maintenance (prochaine : {{.}})</span>{{end}}</td>
       <td>{{if .Op.Snapshotable}}{{if .SnapPossible}}<label class="small"><input type="checkbox" name="snap_{{.Index}}" value="1"{{if .Snapshot}} checked{{end}}> snapshot</label>{{else}}<span class="muted small" title="{{.SnapWhy}}">impossible</span>{{end}}{{else}}<span class="muted small">—</span>{{end}}</td>
     </tr>
     {{end}}
@@ -49,8 +49,17 @@
       <div class="launch-box apply">
         <h3>2. Appliquer</h3>
         <p class="muted small">{{.Runnable}} opération(s) possible(s). Les invités à confirmation renforcée (OMV, PBS, tag critique) se mettent à jour un par un depuis leur fiche.</p>
-        <label class="check"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : appliquer ce lot</span></label>
-        <button type="submit" name="mode" value="appliquer" class="btn d">Appliquer le lot</button>
+        <label class="check"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : appliquer ce lot{{if .Windows}}, maintenant ou dans la fenêtre choisie{{end}}</span></label>
+        <button type="submit" name="mode" value="appliquer" class="btn d">Appliquer le lot maintenant</button>
+        {{if .Windows}}
+        <div class="schedule">
+          <label class="small">ou dans la fenêtre de maintenance
+            <select name="fenetre">{{range .Windows}}<option value="{{.Name}}">{{.Name}} · {{.Label}} · {{if .Open}}ouverte maintenant{{else}}prochaine : {{.Next}}{{end}}</option>{{end}}</select>
+          </label>
+          <button type="submit" name="mode" value="programmer" class="btn">Programmer le lot</button>
+          <p class="muted small">À l'ouverture de la fenêtre : nouvelle détection des invités, plan revérifié, puis les opérations une par une. Celles qui n'ont pas commencé à la fermeture sont annulées. Le lot reste annulable jusqu'à son lancement.</p>
+        </div>
+        {{end}}
       </div>
     </div>
   </section>

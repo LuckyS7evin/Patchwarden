@@ -3,6 +3,10 @@
 (function () {
   "use strict";
 
+  // Page réaffichée depuis le cache du navigateur (Retour) : rechargée, pour
+  // ne pas montrer un état périmé.
+  window.addEventListener("pageshow", function (e) { if (e.persisted) window.location.reload(); });
+
   // Raccourci « / » : recherche.
   document.addEventListener("keydown", function (e) {
     var t = e.target;

@@ -476,6 +476,13 @@ func explainApt(code int, errs, out []string) error {
 		msg := fmt.Sprintf("apt a échoué (code 100) : %s", lastMatching(out, "E: "))
 		if cause := firstMatching(out, "Err:", "E: Failed to fetch"); cause != "" {
 			msg += " · première erreur : " + cause
+			// apt écrit la raison (« 404  Not Found [IP: …] ») sur la ligne suivante.
+			for i, l := range out {
+				if strings.TrimSpace(l) == cause && i+1 < len(out) && strings.HasPrefix(out[i+1], " ") {
+					msg += " (" + strings.TrimSpace(out[i+1]) + ")"
+					break
+				}
+			}
 		}
 		if firstMatching(out, "apt-get update a signalé des erreurs") != "" {
 			msg += " · apt-get update avait déjà échoué juste avant (dépôt injoignable, déplacé ou archivé ?) : lancez « apt-get update » dans l'invité et lisez ses lignes Err: / W:"

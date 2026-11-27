@@ -1176,3 +1176,13 @@ func TestJobStateAndBackButtons(t *testing.T) {
 		}
 	}
 }
+
+func TestPagesNotCached(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	for _, p := range []string{"/", "/inventaire", "/taches"} {
+		if resp, _ := h.do("GET", p, nil, nil); resp.Header.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s : Cache-Control %q", p, resp.Header.Get("Cache-Control"))
+		}
+	}
+}

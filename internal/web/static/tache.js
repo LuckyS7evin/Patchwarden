@@ -29,6 +29,9 @@
     if (errors >= 3 || es.readyState === 2) fallback();
   };
   setTimeout(function () { if (!heard) fallback(); }, 8000);
+  // Filet de sécurité : même si le flux semble ouvert mais ne transmet plus
+  // rien (veille, réseau), l'état est vérifié toutes les 10 s.
+  setInterval(checkEnd, 10000);
   // Retour sur l'onglet (téléphone en veille…) : la tâche a pu finir entre-temps.
   document.addEventListener("visibilitychange", function () { if (!document.hidden) checkEnd(); });
 

@@ -327,6 +327,9 @@ func (s *Server) render(w http.ResponseWriter, page string, status int, data any
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Pages dynamiques : jamais réaffichées depuis le cache (bouton Retour
+	// du navigateur, onglet restauré), sinon une tâche finie paraît en cours.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(buf.String()))
 }

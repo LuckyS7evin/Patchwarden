@@ -260,7 +260,7 @@ func TestExplainAptFetchError(t *testing.T) {
 		"E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?",
 	}
 	err := explainApt(100, nil, out)
-	if err == nil || !strings.Contains(err.Error(), "Err:5 http://security.debian.org bullseye-security Release") || !strings.Contains(err.Error(), "apt-get update avait déjà échoué") {
+	if err == nil || !strings.Contains(err.Error(), "Err:5 http://security.debian.org bullseye-security Release (404  Not Found)") || !strings.Contains(err.Error(), "apt-get update avait déjà échoué") {
 		t.Errorf("explication : %v", err)
 	}
 }

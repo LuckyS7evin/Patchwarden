@@ -134,6 +134,29 @@ cache_ttl = "6h"
 # icons = true
 # icon_base = "https://cdn.jsdelivr.net/gh/selfhst/icons/webp"
 
+# Fenêtres de maintenance (lots programmés, sécurité automatique). Une action hors de la
+# fenêtre d'un invité affiche un avertissement, sans être bloquée.
+# [[maintenance]]
+# name = "nuit"
+# days = ["dim"]            # lun … dim ; vide : tous les jours
+# start = "03:00"
+# duration = "2h"
+# tags = []                 # invités concernés ; vide : tous
+
+# Sécurité automatique : DÉSACTIVÉE par défaut. Activée, elle applique « Sécurité
+# uniquement » (avec snapshot et vérification) aux invités portant le tag, à l'ouverture de
+# la fenêtre ; jamais les invités critiques, OMV, PBS ni celui de PatchWarden.
+# [auto_security]
+# enabled = false
+# tag = "auto-securite"
+# window = "nuit"
+# snapshot = true
+
+# Métriques Prometheus sur /metrics (en-tête Authorization: Bearer <jeton>). Sans jeton :
+# désactivées.
+# [metrics]
+# token_env = "PATCHWARDEN_METRICS_TOKEN"
+
 # Notifications : une section par cible. Types : ntfy, gotify, webhook.
 # Événements : securite (nouveaux correctifs), applis (nouvelles versions),
 # echec (mise à jour ou détection planifiée en échec), succes (mise à jour réussie).

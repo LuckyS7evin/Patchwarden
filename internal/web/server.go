@@ -20,6 +20,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/eol"
 	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 //go:embed templates/*.html static/*
@@ -53,6 +54,14 @@ type Engine interface {
 	OSSupport(r detect.Result) eol.Status
 	PlanDocker(g inventory.Guest, keys []string) engine.DockerPlan
 	SyncSnapshots(guests []inventory.Guest)
+	CheckURL(key string) string
+	SetCheckURL(key, raw string) error
+	ScheduleBatch(reqs []engine.BatchRequest, stopOnFail bool, user, windowName string) (engine.Batch, error)
+	CancelBatch(id, user string) error
+	WindowFor(g inventory.Guest, now time.Time) engine.WindowStatus
+	MaintenanceWindows() []window.Window
+	NextAuto(now time.Time) time.Time
+	AutoCandidates() []inventory.Guest
 	ExecuteDocker(g inventory.Guest, keys []string, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
 }
 
@@ -227,6 +236,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /icones", s.authed(s.iconHandler))
 	mux.HandleFunc("GET /sante", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /connexion", s.loginForm)
 	mux.HandleFunc("POST /connexion", s.sameOrigin(s.loginSubmit))
 	mux.HandleFunc("POST /deconnexion", s.sameOrigin(s.authed(s.csrf(s.logout))))
@@ -235,6 +245,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /lot", s.authed(s.batchPrepare))
 	mux.HandleFunc("POST /lot", s.sameOrigin(s.authed(s.csrf(s.batchSubmit))))
 	mux.HandleFunc("GET /lots/{id}", s.authed(s.batchPage))
+	mux.HandleFunc("POST /lots/{id}/annuler", s.sameOrigin(s.authed(s.csrf(s.batchCancel))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/redemarrage", s.authed(s.restartPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/redemarrage", s.sameOrigin(s.authed(s.csrf(s.restartSubmit))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/docker", s.authed(s.dockerPage))
@@ -250,6 +261,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /invites/{node}/{vmid}/action/{action}", s.sameOrigin(s.authed(s.csrf(s.actionSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/reponses", s.sameOrigin(s.authed(s.csrf(s.saveAnswers))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/reglage", s.sameOrigin(s.authed(s.csrf(s.saveSnapPref))))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/verification", s.sameOrigin(s.authed(s.csrf(s.saveCheckURL))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.authed(s.rollbackPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.sameOrigin(s.authed(s.csrf(s.rollbackSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/supprimer", s.sameOrigin(s.authed(s.csrf(s.deleteSnapshot))))

@@ -44,6 +44,9 @@ type Message struct {
 	Body     string
 	Priority int    // 1 (min) à 5 (urgent)
 	URL      string // lien vers PatchWarden, facultatif
+	// Always : envoyé à toutes les cibles, quel que soit leur filtre
+	// d'événements (actions automatiques).
+	Always bool
 }
 
 // Target est une destination configurée.
@@ -109,7 +112,7 @@ func (h *Hub) Notify(m Message) {
 func (h *Hub) Send(ctx context.Context, m Message) []error {
 	var errs []error
 	for _, t := range h.targets {
-		if m.Event != EvTest && !t.events[m.Event] {
+		if m.Event != EvTest && !m.Always && !t.events[m.Event] {
 			continue
 		}
 		if err := t.send(ctx, m); err != nil {

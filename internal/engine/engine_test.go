@@ -152,6 +152,8 @@ echo "2 upgraded, 0 newly installed, 0 to remove and 0 not upgraded."
 // Faux systemctl (dans le CT) : « redémarre » un service en supprimant ses
 // processus du faux /proc.
 const fakeSystemctl = `#!/bin/bash
+# list-units --state=failed : services en échec (FAKE_FAILED_UNIT).
+if [ "$1" = list-units ]; then [ -n "$FAKE_FAILED_UNIT" ] && echo "$FAKE_FAILED_UNIT loaded failed failed Faux service"; exit 0; fi
 [ "$1" = restart ] || exit 0
 u="$3"
 echo "systemctl restart $u" >> "$PCT_SET_LOG"

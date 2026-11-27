@@ -20,6 +20,7 @@ import (
 	"github.com/LuckyS7evin/patchwarden/internal/registry"
 	"github.com/LuckyS7evin/patchwarden/internal/sshx"
 	"github.com/LuckyS7evin/patchwarden/internal/upstream"
+	"github.com/LuckyS7evin/patchwarden/internal/window"
 )
 
 // Engine porte les dépendances.
@@ -57,6 +58,14 @@ type Engine struct {
 	hosts          *dockerHosts
 	// ListSnapshots (facultatif) : snapshots d'un invité lus par l'API Proxmox.
 	ListSnapshots SnapLister
+	// Checks : adresse de vérification HTTP de chaque invité (facultatif).
+	Checks *PrefStore
+	// Windows : fenêtres de maintenance ; Guests : inventaire courant (lots
+	// programmés, sécurité automatique).
+	Windows []window.Window
+	Guests  func() []inventory.Guest
+	// Auto : sécurité automatique (désactivée par défaut).
+	Auto AutoConfig
 }
 
 // OSSupport renvoie l'état du support du système d'un invité détecté.
@@ -81,7 +90,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 10
+const WrapperVersion = 11
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {

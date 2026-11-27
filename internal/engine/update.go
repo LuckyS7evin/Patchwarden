@@ -185,6 +185,9 @@ func (e *Engine) PlanFor(g inventory.Guest, a Action) Plan {
 	if g.Critical {
 		p.Warnings = append(p.Warnings, "invité critique ("+g.CriticalReason+") : saisissez son nom pour confirmer")
 	}
+	if w := e.outsideWindow(g); w != "" {
+		p.Warnings = append(p.Warnings, w)
+	}
 	p.Steps = append(p.Steps, "détection après la mise à jour, pour vérifier le résultat")
 	e.planSnapshot(&p, det)
 	return p
@@ -411,13 +414,11 @@ func (e *Engine) updateFunc(p Plan, dryRun, snapshot bool, user string) jobs.Fun
 
 		// 3. vérification
 		if !dryRun {
-			log(false, "")
-			res, err := e.detectRun(ctx, g, job.ID, log)
+			res, err := e.afterOp(ctx, g, p.Det, job, log)
 			if err != nil {
-				log(true, "⚠ détection après mise à jour impossible : "+err.Error())
-			} else {
-				summary = append(summary, "après : "+summarize(res))
+				return strings.Join(summary, " · "), err
 			}
+			summary = append(summary, "après : "+summarize(res), "vérification réussie")
 		}
 		return strings.Join(summary, " · "), nil
 	}

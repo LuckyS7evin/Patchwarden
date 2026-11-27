@@ -18,7 +18,7 @@ de mémoire, sans agent dans les invités.
 | 6 | Lots, regroupement par tags, redémarrages requis | ✅ |
 | 7 | VMs (guest agent), OMV/PBS, fin de support des OS | ✅ |
 | 8 | Docker : stacks Portainer (API), projets docker compose, comparaison aux registres | ✅ (à recetter) |
-| 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique, métriques Prometheus | à faire |
+| 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique (désactivée par défaut), métriques Prometheus | ✅ (à recetter) |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -341,6 +341,71 @@ déclarer par invité, rien à changer après un changement d'adresse IP des inv
 **Arrêtez Watchtower** s'il tourne : il met les images à jour de son côté, et PatchWarden
 verrait alors tout « à jour ».
 
+### 9. Vérification, fenêtres de maintenance, sécurité automatique, métriques (facultatif)
+
+**Vérification après une opération** : active d'office. Après chaque mise à jour (apt, Docker)
+ou redémarrage réel, PatchWarden compare l'invité à son état d'avant : services systemd
+nouvellement en échec, conteneurs qui tournaient et ne tournent plus, conteneurs devenus
+« unhealthy ». Un problème passager est revérifié deux fois à 30 s d'intervalle ; s'il reste,
+la tâche échoue (un lot s'arrête) et le retour arrière au snapshot est proposé, jamais lancé
+seul. Sur la fiche d'un invité, « Vérification après une opération » : une adresse HTTP
+facultative qui doit répondre ensuite (statut < 400, 2 minutes d'essais).
+
+**Fenêtres de maintenance** :
+
+```toml
+[[maintenance]]
+name = "nuit"
+days = ["dim"]          # lun, mar, mer, jeu, ven, sam, dim ; vide : tous les jours
+start = "03:00"
+duration = "2h"
+tags = []               # invités concernés (avertissement hors fenêtre) ; vide : tous
+```
+
+Une action lancée hors de la fenêtre d'un invité affiche un avertissement, sans être bloquée.
+Sur la page d'un lot, « Programmer le lot » : à l'ouverture de la fenêtre, PatchWarden détecte
+les invités, revérifie le plan, puis enchaîne les opérations ; celles qui n'ont pas commencé à
+la fermeture sont annulées. Un lot programmé reste annulable (page du lot) jusqu'à son lancement.
+
+**Sécurité automatique** (désactivée par défaut) : à l'ouverture de sa fenêtre, « Sécurité
+uniquement » sur les invités qui portent le tag choisi, après une détection, avec snapshot
+(un invité dont le snapshot est impossible est ignoré), vérification et arrêt au premier
+échec. Jamais les applis, les versions majeures, Docker, ni les invités critiques, OMV, PBS
+ou celui de PatchWarden. Une seule exécution par ouverture de fenêtre ; son compte rendu est
+toujours notifié, quel que soit le filtre `events`.
+
+```toml
+[auto_security]
+enabled = true
+tag = "auto-securite"   # à poser dans Proxmox sur les invités concernés
+window = "nuit"         # une section [[maintenance]]
+snapshot = true
+```
+
+**Métriques Prometheus** : `PATCHWARDEN_METRICS_TOKEN=…` dans `patchwarden.env`
+(`openssl rand -hex 24`), puis :
+
+```toml
+[metrics]
+token_env = "PATCHWARDEN_METRICS_TOKEN"
+```
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: patchwarden
+    scrape_interval: 5m
+    authorization:
+      credentials: "<le jeton>"
+    static_configs:
+      - targets: ["192.168.0.19:8094"]
+```
+
+Par invité : correctifs de sécurité, paquets apt, applis, images Docker, redémarrage requis,
+services en échec, support de l'OS, âge de la détection, snapshots ; plus les tâches par type
+et résultat. Tableau de bord Grafana d'exemple : [deploy/grafana-dashboard.json](deploy/grafana-dashboard.json)
+(Dashboards → Importer).
+
 ### Mettre à jour PatchWarden
 
 Aide-mémoire complet (PatchWarden, wrapper, vérification, problèmes courants) :
@@ -381,7 +446,7 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v10) | Effet |
+| Verbe (wrapper v11) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
@@ -396,6 +461,10 @@ le wrapper, relisible sur le nœud.
 | `lxc-docker-compose <vmid> <projet> <0\|1>` | Dans l'invité : retrouve le dossier et les fichiers du projet compose dans les labels de ses conteneurs (rien n'est transmis par PatchWarden), refuse une stack Portainer, puis `docker compose pull` et `up -d --no-deps` des seuls services démarrés. `1` = simulation (`docker compose config`) |
 | `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
 | Modes de `*-apt` | `security`, `full`, et pour les produits particuliers `dist` (PBS : `apt-get dist-upgrade`) et `omv` (OpenMediaVault : `omv-upgrade`) ; ces deux modes refusent toute mise à jour qui supprimerait un paquet (code 22) |
+
+La détection lit aussi les services systemd en échec (`systemctl list-units --state=failed`)
+et l'état de santé des conteneurs (healthcheck) : lecture seule, pour la vérification après
+une opération.
 
 La détection lit aussi la liste des conteneurs (`docker ps`, `docker inspect`, `docker image
 inspect`, `docker compose version`) : lecture seule.

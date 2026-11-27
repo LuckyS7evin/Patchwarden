@@ -4,7 +4,7 @@
   <div class="pagehead">
     <div>
       <h1>À traiter</h1>
-      <p class="sub">Ce qui attend une action, du plus urgent au moins urgent{{with .Shell.NextDetection}} · prochaine détection {{.}}{{end}}</p>
+      <p class="sub">Ce qui attend une action, du plus urgent au moins urgent{{with .Shell.NextDetection}} · prochaine détection {{.}}{{end}}{{with .AutoNext}} · sécurité automatique {{.}} ({{$.AutoCount}} invité(s)){{end}}</p>
     </div>
   </div>
   {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}

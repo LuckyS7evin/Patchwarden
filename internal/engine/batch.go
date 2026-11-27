@@ -80,6 +80,9 @@ const (
 	BatchDone        = "terminé"
 	BatchStopped     = "arrêté après un échec"
 	BatchInterrupted = "interrompu"
+	// BatchScheduled : lot confirmé, lancé à l'ouverture de sa fenêtre.
+	BatchScheduled = "programmé"
+	BatchCancelled = "annulé"
 )
 
 // BatchItem est une opération sur un invité.
@@ -108,10 +111,20 @@ type Batch struct {
 	StopOnFail bool        `json:"stop_on_fail"`
 	Status     string      `json:"status"`
 	Items      []BatchItem `json:"items"`
+	// Lot programmé : fenêtre de maintenance, ouverture et fermeture. Une
+	// opération pas encore commencée à la fermeture est annulée.
+	Window      string    `json:"window,omitempty"`
+	ScheduledAt time.Time `json:"scheduled_at,omitempty"`
+	Until       time.Time `json:"until,omitempty"`
+	// Auto : lot de la sécurité automatique.
+	Auto bool `json:"auto,omitempty"`
 }
 
 // Running dit si le lot n'est pas terminé.
 func (b Batch) Running() bool { return b.Status == BatchRunning }
+
+// Scheduled dit si le lot attend sa fenêtre de maintenance.
+func (b Batch) Scheduled() bool { return b.Status == BatchScheduled }
 
 // Count compte les éléments dans un état.
 func (b Batch) Count(status string) int {
@@ -321,8 +334,28 @@ func newBatchID(now time.Time) string {
 // une mise à jour puis un redémarrage, mais pas deux fois la même sorte
 // d'opération. Les opérations impossibles sont ignorées (avec la raison).
 func (e *Engine) StartBatch(reqs []BatchRequest, dryRun, stopOnFail bool, user string) (Batch, error) {
+	b, guests, err := e.newBatch(reqs, dryRun, stopOnFail, user)
+	if err != nil {
+		return Batch{}, err
+	}
+	e.storeBatch(b)
+	go e.runBatch(b.ID, guests)
+	c, _ := e.Batches.Get(b.ID)
+	return c, nil
+}
+
+func (e *Engine) storeBatch(b *Batch) {
+	e.Batches.mu.Lock()
+	e.Batches.m[b.ID] = b
+	_ = e.Batches.saveLocked(b)
+	e.Batches.mu.Unlock()
+	e.Batches.prune()
+}
+
+// newBatch prépare un lot : opérations impossibles ignorées (avec la raison).
+func (e *Engine) newBatch(reqs []BatchRequest, dryRun, stopOnFail bool, user string) (*Batch, map[int]inventory.Guest, error) {
 	if e.Batches == nil {
-		return Batch{}, errors.New("lots indisponibles")
+		return nil, nil, errors.New("lots indisponibles")
 	}
 	now := time.Now()
 	b := &Batch{ID: newBatchID(now), CreatedAt: now, By: user, DryRun: dryRun, StopOnFail: stopOnFail, Status: BatchRunning}
@@ -349,16 +382,9 @@ func (e *Engine) StartBatch(reqs []BatchRequest, dryRun, stopOnFail bool, user s
 		b.Items = append(b.Items, it)
 	}
 	if runnable == 0 {
-		return Batch{}, ErrEmptyBatch
+		return nil, nil, ErrEmptyBatch
 	}
-	e.Batches.mu.Lock()
-	e.Batches.m[b.ID] = b
-	_ = e.Batches.saveLocked(b)
-	e.Batches.mu.Unlock()
-	e.Batches.prune()
-	go e.runBatch(b.ID, guests)
-	c, _ := e.Batches.Get(b.ID)
-	return c, nil
+	return b, guests, nil
 }
 
 // opKind : clé d'unicité dans un lot (une mise à jour, un redémarrage des
@@ -400,7 +426,29 @@ func (e *Engine) runBatch(id string, guests map[int]inventory.Guest) {
 			})
 			continue
 		}
-		j, err := e.submitOp(guests[i], it, b.DryRun, b.By)
+		if !b.Until.IsZero() && time.Now().After(b.Until) {
+			e.Batches.update(id, func(bt *Batch) {
+				bt.Items[i].Status, bt.Items[i].Error = ItemCancelled, "fenêtre de maintenance terminée"
+			})
+			continue
+		}
+		g, ok := guests[i]
+		if !ok {
+			// Lot programmé : l'invité est relu dans l'inventaire au moment de l'exécution.
+			g, ok = e.guestByKey(it.Key())
+		}
+		if !ok {
+			e.Batches.update(id, func(bt *Batch) { bt.Items[i].Status, bt.Items[i].Error = ItemSkipped, "invité absent de l'inventaire" })
+			continue
+		}
+		if b.Window != "" {
+			// Le plan est revérifié à l'exécution (détection du jour).
+			if why := e.checkOp(BatchRequest{Guest: g, Op: it.Op, Snapshot: it.Snapshot}); why != "" {
+				e.Batches.update(id, func(bt *Batch) { bt.Items[i].Status, bt.Items[i].Error = ItemSkipped, why })
+				continue
+			}
+		}
+		j, err := e.submitOp(g, it, b.DryRun, b.By)
 		if err != nil {
 			e.Batches.update(id, func(bt *Batch) { bt.Items[i].Status, bt.Items[i].Error = ItemFailed, err.Error() })
 			stop = b.StopOnFail && !b.DryRun
@@ -445,7 +493,7 @@ func (e *Engine) notifyBatch(id string) {
 		return
 	}
 	ok2, failed := b.Count(ItemSuccess), b.Count(ItemFailed)
-	m := notify.Message{URL: e.link("/lots/" + b.ID)}
+	m := notify.Message{URL: e.link("/lots/" + b.ID), Always: b.Auto}
 	var lines []string
 	for _, it := range b.Items {
 		line := fmt.Sprintf("%s (%s/%d) : %s — %s", it.Name, it.Node, it.VMID, it.Op.Label(), it.Status)
@@ -455,9 +503,19 @@ func (e *Engine) notifyBatch(id string) {
 		lines = append(lines, line)
 	}
 	m.Body = strings.Join(lines, "\n")
+	what := "lot"
+	if b.Auto {
+		what = "sécurité automatique"
+	}
 	if failed == 0 && b.Status == BatchDone {
 		m.Event, m.Priority = notify.EvSuccess, 2
-		m.Title = fmt.Sprintf("PatchWarden : lot terminé, %d opération(s) réussie(s)", ok2)
+		m.Title = fmt.Sprintf("PatchWarden : %s terminée, %d opération(s) réussie(s)", what, ok2)
+		if !b.Auto {
+			m.Title = fmt.Sprintf("PatchWarden : lot terminé, %d opération(s) réussie(s)", ok2)
+		}
+	} else if b.Auto {
+		m.Event, m.Priority = notify.EvFailure, 4
+		m.Title = fmt.Sprintf("PatchWarden : sécurité automatique %s, %d réussie(s), %d échec(s)", b.Status, ok2, failed)
 	} else {
 		m.Event, m.Priority = notify.EvFailure, 4
 		m.Title = fmt.Sprintf("PatchWarden : lot %s, %d réussie(s), %d échec(s)", b.Status, ok2, failed)

@@ -224,7 +224,7 @@ l'entrée standard ; sans la correction, 7 tests échouent.
 | 6 ✅ | Lots, regroupement par tags (6), redémarrages requis (8) |
 | 7 ✅ | VMs via le guest agent, OMV et PBS, fin de support des OS (7) |
 | 8 ✅ | Docker via l'API Portainer (à recetter) |
-| 9 | Vérification après mise à jour (4), fenêtres de maintenance (9), sécurité automatique (10, après les snapshots), métriques Prometheus (11) |
+| 9 ✅ | Vérification après mise à jour (4), fenêtres de maintenance (9), sécurité automatique (10, désactivée par défaut), métriques Prometheus (11) (à recetter) |
 
 Écartée pour l'instant : comptes multiples / OIDC (12).
 
@@ -329,3 +329,14 @@ sinon) plutôt que des encadrés.
 | Snapshot | Celui de l'invité, nommé `pw-…-docker` (même règles, même rétention) |
 | Images anciennes | Laissées sur le disque (pas de `docker image prune` automatique) |
 | Watchtower | Signalé (« À traiter », fiche) : à arrêter |
+
+## Jalon 9 : vérification, fenêtres, sécurité automatique, métriques (27/11/2026)
+
+| Sujet | Décision |
+| :--- | :--- |
+| Vérification | Après chaque opération réelle (apt, Docker, redémarrages) : services systemd nouvellement en échec, conteneurs arrêtés ou devenus « unhealthy », par rapport à la détection d'avant ; deux nouveaux essais à 30 s si le problème peut être passager. Échec : tâche en échec (le lot s'arrête), retour arrière proposé, jamais automatique |
+| Vérification HTTP | Adresse facultative par invité (fiche) ; statut < 400 en 2 minutes ; certificat non vérifié (homelab, auto-signé) |
+| Fenêtres | Hebdomadaires (jours, début, durée), tags facultatifs. Hors fenêtre : avertissement, jamais de blocage |
+| Lots programmés | Détection puis plan revérifié à l'ouverture ; opérations non commencées à la fermeture : annulées ; fenêtre manquée (PatchWarden arrêté) : lot annulé, jamais lancé en retard |
+| Sécurité automatique | Désactivée par défaut ; le tag posé dans Proxmox vaut confirmation (exception assumée à « aucune action sans confirmation dans l'UI »). « Sécurité uniquement » seulement, snapshot exigé par défaut, arrêt au premier échec, une exécution par ouverture, compte rendu toujours notifié |
+| Métriques | /metrics au format Prometheus, désactivé sans jeton, jeton Bearer comparé en temps constant ; jauges par invité et tâches par type |

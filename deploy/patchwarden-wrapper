@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 10) :
+# Verbes (version 11) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -71,7 +71,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=10
+WRAPPER_VERSION=11
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -250,6 +250,10 @@ if [ -e /var/run/reboot-required ]; then kv sys.reboot_required 1; else kv sys.r
 pw_stale_procs | while IFS='|' read -r unit comm; do
 	if [ -n "$unit" ]; then kv restart.unit "$unit"; else kv restart.proc "$comm"; fi
 done | sort -u
+# Services systemd en échec (comparés avant et après une mise à jour).
+if has systemctl; then
+	systemctl list-units --state=failed --no-legend --plain </dev/null 2>/dev/null | awk '$1 ~ /\./ { print "health.failed=" $1 }'
+fi
 
 if [ -f /usr/bin/update ]; then
 	name="$(sed -n 's/^export UPDATE_SCRIPT_NAME="\{0,1\}\([A-Za-z0-9._-]*\).*/\1/p' /usr/bin/update | head -n 1)"
@@ -359,6 +363,9 @@ if has docker && docker info </dev/null >/dev/null 2>&1; then
 		for r in $(docker inspect --format '{{.Config.Image}}' $ids </dev/null 2>/dev/null | sort -u); do
 			printf 'docker.ref=%s|%s\n' "$r" "$(docker image inspect --format '{{range .RepoDigests}}{{.}},{{end}}' "$r" </dev/null 2>/dev/null | tr -d '\r\n')"
 		done
+		# État de santé (HEALTHCHECK) des conteneurs qui en ont un.
+		# shellcheck disable=SC2086
+		docker inspect --format '{{if .State.Health}}docker.health={{.Name}}|{{.State.Health.Status}}{{end}}' $ids </dev/null 2>/dev/null | grep '^docker.health=' | tr -d '\r'
 	fi
 else
 	kv docker.present 0

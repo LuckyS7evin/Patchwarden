@@ -132,6 +132,8 @@ type Result struct {
 	SpecialVersion string `json:"special_version,omitempty"`
 	// DockerInfo : conteneurs, groupes de mise à jour et comparaison aux registres.
 	DockerInfo Docker `json:"docker_info,omitempty"`
+	// FailedUnits : services systemd en échec au moment de la détection.
+	FailedUnits []string `json:"failed_units,omitempty"`
 }
 
 // SpecialLabel renvoie le nom lisible du produit particulier.
@@ -166,6 +168,7 @@ func Parse(lines []string) (Result, error) {
 	r := Result{Apt: Apt{IndexAgeHours: -1}}
 	var begin, end bool
 	images, refs := map[string][]string{}, map[string][]string{}
+	health := map[string]string{}
 	for _, l := range lines {
 		k, v, ok := strings.Cut(l, "=")
 		if !ok {
@@ -242,6 +245,12 @@ func Parse(lines []string) (Result, error) {
 			r.Containers = atoi(v)
 		case "docker.compose", "docker.ctr", "docker.img", "docker.ref":
 			r.DockerInfo.parseLine(k, v, images, refs)
+		case "docker.health":
+			if name, st, ok := strings.Cut(v, "|"); ok {
+				health[strings.TrimPrefix(strings.TrimSpace(name), "/")] = strings.TrimSpace(st)
+			}
+		case "health.failed":
+			r.FailedUnits = append(r.FailedUnits, v)
 		}
 	}
 	if !begin || !end {
@@ -250,6 +259,7 @@ func Parse(lines []string) (Result, error) {
 	r.Apt.reconcileSecurity()
 	for i := range r.DockerInfo.List {
 		c := &r.DockerInfo.List[i]
+		c.Health = health[c.Name]
 		c.Digests = images[c.ImageID]
 		if len(c.Digests) == 0 {
 			// Magasin d'images containerd : l'identifiant d'image vu par le

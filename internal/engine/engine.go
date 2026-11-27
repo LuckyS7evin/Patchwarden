@@ -55,6 +55,8 @@ type Engine struct {
 	Portainers     map[string]Portainer
 	PortainerOrder []string
 	hosts          *dockerHosts
+	// ListSnapshots (facultatif) : snapshots d'un invité lus par l'API Proxmox.
+	ListSnapshots SnapLister
 }
 
 // OSSupport renvoie l'état du support du système d'un invité détecté.

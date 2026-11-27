@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -102,6 +103,32 @@ func New(ep config.Endpoint, timeout time.Duration) (*Client, error) {
 		auth:    "PVEAPIToken=" + ep.TokenID + "=" + ep.TokenSecret,
 		http:    &http.Client{Transport: tr, Timeout: timeout},
 	}, nil
+}
+
+// Snapshot est un snapshot d'un invité, lu par l'API (droit VM.Audit,
+// compris dans PVEAuditor).
+type Snapshot struct {
+	Name        string `json:"name"`
+	SnapTime    int64  `json:"snaptime"`
+	Description string `json:"description"`
+}
+
+// Snapshots liste les snapshots d'un invité (« current » exclu). typ : lxc ou qemu.
+func (c *Client) Snapshots(ctx context.Context, node, typ string, vmid int) ([]Snapshot, error) {
+	if typ != "lxc" && typ != "qemu" {
+		return nil, fmt.Errorf("type d'invité inattendu : %q", typ)
+	}
+	var all []Snapshot
+	if err := c.get(ctx, "/nodes/"+url.PathEscape(node)+"/"+typ+"/"+strconv.Itoa(vmid)+"/snapshot", &all); err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, s := range all {
+		if s.Name != "current" {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 // Name renvoie le nom du point d'accès.

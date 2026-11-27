@@ -370,7 +370,7 @@ le wrapper est trop ancien.
 
 | Accès | Utilisé pour | Droits | Depuis |
 | :--- | :--- | :--- | :--- |
-| Jeton API `patchwarden@pve!inventaire` | Inventaire, état des nœuds et des stockages (`/cluster/resources`) | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
+| Jeton API `patchwarden@pve!inventaire` | Inventaire, état des nœuds et des stockages (`/cluster/resources`) ; liste des snapshots d'un invité (`/nodes/<nœud>/<lxc\|qemu>/<id>/snapshot`), pour que les pages suivent un snapshot supprimé ou restauré hors de PatchWarden | `PVEAuditor` sur `/` (lecture seule) | Jalon 1 |
 | Clé SSH vers root des nœuds, **commande forcée** | Verbes du wrapper | Une seule commande possible (le wrapper), depuis la seule IP de PatchWarden, `restrict` : ni terminal, ni redirection de ports, ni agent | Jalon 2 |
 | Jeton GitHub (facultatif) | Dernières versions des applis | Aucun droit : lecture des dépôts publics | Jalon 2 |
 | Registres d'images | Empreinte actuelle d'un tag, liste des tags | Aucun compte : jeton anonyme en lecture, dépôts publics seulement | Jalon 8 |

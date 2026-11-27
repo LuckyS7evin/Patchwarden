@@ -132,3 +132,23 @@ func TestUnknownNodeStatusNodeDown(t *testing.T) {
 		t.Errorf("les données partielles doivent être gardées : %v %+v", err, g)
 	}
 }
+
+func TestSnapshots(t *testing.T) {
+	srv, fp := server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api2/json/nodes/odin/qemu/107/snapshot" {
+			t.Errorf("requête inattendue : %s", r.URL)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"name":"pw-20261127-1023-securite","snaptime":1795770180,"description":"PatchWarden"},{"name":"current","running":1}]}`))
+	})
+	c, err := New(endpoint(srv.URL, fp), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := c.Snapshots(context.Background(), "odin", "qemu", 107)
+	if err != nil || len(l) != 1 || l[0].Name != "pw-20261127-1023-securite" || l[0].SnapTime != 1795770180 {
+		t.Errorf("snapshots : %+v %v", l, err)
+	}
+	if _, err := c.Snapshots(context.Background(), "odin", "../x", 1); err == nil {
+		t.Error("type d'invité non vérifié")
+	}
+}

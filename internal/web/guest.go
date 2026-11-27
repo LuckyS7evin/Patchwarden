@@ -6,6 +6,7 @@ import (
 
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
+	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 )
 
@@ -54,6 +55,7 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 	if !ok {
 		return guestData{}, false
 	}
+	s.deps.Engine.SyncSnapshots([]inventory.Guest{g})
 	d := guestData{
 		base:   s.base(fmt.Sprintf("%s (%d)", g.Name, g.VMID), "inventaire", se),
 		Row:    s.rowFor(g),

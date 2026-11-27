@@ -122,6 +122,7 @@ type snapshotsData struct {
 // snapshotsPage liste tous les snapshots PatchWarden, du plus ancien au plus récent.
 func (s *Server) snapshotsPage(w http.ResponseWriter, r *http.Request, se *session) {
 	snap, _ := s.inv.Current()
+	s.deps.Engine.SyncSnapshots(snap.Guests)
 	d := snapshotsData{base: s.base("Snapshots", "snapshots", se), Defaults: s.deps.Engine.SnapDefaults()}
 	for _, g := range snap.Guests {
 		rw := s.rowFor(g)

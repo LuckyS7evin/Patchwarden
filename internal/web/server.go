@@ -52,6 +52,7 @@ type Engine interface {
 	StartBatch(reqs []engine.BatchRequest, dryRun, stopOnFail bool, user string) (engine.Batch, error)
 	OSSupport(r detect.Result) eol.Status
 	PlanDocker(g inventory.Guest, keys []string) engine.DockerPlan
+	SyncSnapshots(guests []inventory.Guest)
 	ExecuteDocker(g inventory.Guest, keys []string, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
 }
 

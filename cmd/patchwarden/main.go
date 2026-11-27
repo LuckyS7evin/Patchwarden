@@ -222,6 +222,19 @@ func serve(args []string) error {
 		}
 	}
 	jm.OnFinish = eng.NotifyJob
+	eng.ListSnapshots = func(ctx context.Context, node, typ string, vmid int) ([]proxmox.Snapshot, error) {
+		var last error
+		for _, s := range srcs {
+			if c, ok := s.(*proxmox.Client); ok {
+				l, err := c.Snapshots(ctx, node, typ, vmid)
+				if err == nil {
+					return l, nil
+				}
+				last = err
+			}
+		}
+		return nil, last
+	}
 	if cfg.SSH.Enabled() {
 		ex, err := sshx.New(cfg.SSH)
 		if err != nil {

@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LuckyS7evin/patchwarden/internal/detect"
+	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
+	"github.com/LuckyS7evin/patchwarden/internal/proxmox"
 )
 
 func (e *env) snaps(t *testing.T) string {
@@ -263,5 +266,29 @@ func TestWrapperRefusesForeignSnapshots(t *testing.T) {
 	}
 	if strings.Contains(e.pctSets(), "avant-maj") {
 		t.Errorf("snapshot manuel touché : %q", e.pctSets())
+	}
+}
+
+func TestSyncSnapshotsWithAPI(t *testing.T) {
+	e := setup(t)
+	g := e.guest
+	_ = e.eng.Store.Put(g.Key(), detect.Result{At: time.Now(), Snap: detect.SnapInfo{Known: true, Possible: true,
+		PW: []detect.Snapshot{{Name: "pw-20261127-1023-securite"}, {Name: "pw-20261126-0900-complet"}}, Other: 3}})
+	calls := 0
+	e.eng.ListSnapshots = func(_ context.Context, node, typ string, vmid int) ([]proxmox.Snapshot, error) {
+		calls++
+		if node != "loki" || typ != "lxc" || vmid != 104 {
+			t.Errorf("invité demandé : %s %s %d", node, typ, vmid)
+		}
+		return []proxmox.Snapshot{{Name: "pw-20261126-0900-complet", SnapTime: 1795000000}, {Name: "avant-maj"}}, nil
+	}
+	e.eng.SyncSnapshots([]inventory.Guest{g})
+	det, _ := e.eng.Store.Get(g.Key())
+	if len(det.Snap.PW) != 1 || det.Snap.PW[0].Name != "pw-20261126-0900-complet" || det.Snap.Other != 1 || !det.Snap.Possible {
+		t.Errorf("snapshots après rapprochement : %+v", det.Snap)
+	}
+	e.eng.SyncSnapshots([]inventory.Guest{g})
+	if calls != 1 {
+		t.Errorf("API appelée %d fois en moins d'une minute", calls)
 	}
 }

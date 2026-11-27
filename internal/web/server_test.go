@@ -224,6 +224,8 @@ func (f *fakeEngine) ExecuteDocker(g inventory.Guest, keys []string, dry bool, u
 	})
 }
 
+func (f *fakeEngine) SyncSnapshots([]inventory.Guest) {}
+
 func (f *fakeEngine) SetAnswers(key string, a map[string]string) error {
 	if f.answers == nil {
 		f.answers = map[string]map[string]string{}

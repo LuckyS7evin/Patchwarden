@@ -316,6 +316,7 @@ type todoData struct {
 
 func (s *Server) todoPage(w http.ResponseWriter, r *http.Request, se *session) {
 	snap, _ := s.inv.Current()
+	s.deps.Engine.SyncSnapshots(snap.Guests)
 	all := s.allDetections()
 	d := todoData{
 		base:     s.base("À traiter", "traiter", se),

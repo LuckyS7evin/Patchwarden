@@ -104,28 +104,6 @@
   {{if gt .Missing 0}}<p class="alert alert-warn">Le script pose des questions sans terminal : <a href="?onglet=questions">enregistrez une réponse pour chacune</a> avant de mettre à jour l'application.</p>{{end}}
   </div>
   <div>
-    <section class="card">
-      <h2>Historique</h2>
-      {{if .Jobs}}<div class="tl">
-        {{range $i, $j := .Jobs}}{{if lt $i 5}}<div class="tev {{evClass .Status}}"><a href="/taches/{{.ID}}">{{.Kind}}{{if .DryRun}} (simulation){{end}}</a>{{if .Error}} · <span class="crit">{{.Error}}</span>{{else if .Summary}} · {{.Summary}}{{end}}<div class="t">{{when .CreatedAt}} · {{.RequestedBy}} · {{.Status}}</div></div>{{end}}{{end}}
-      </div>
-      {{if gt (len .Jobs) 5}}<a href="?onglet=historique">Tout l'historique →</a>{{end}}
-      {{else}}<p class="muted">Aucune tâche.</p>{{end}}
-    </section>
-    {{if or (eq .Row.Type "lxc") (eq .Row.Type "qemu")}}
-    <section class="card">
-      <h2>Vérification après une opération</h2>
-      <p class="small">Après chaque mise à jour ou redémarrage réel, PatchWarden compare l'invité à son état d'avant : services systemd en échec, conteneurs arrêtés ou en mauvaise santé. En cas de problème, la tâche échoue et le retour arrière est proposé (jamais lancé seul).</p>
-      <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/verification" class="inline-form">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <label class="small">Adresse qui doit répondre ensuite (facultatif)
-          <input type="url" name="url" value="{{.CheckURL}}" placeholder="https://paperless.lan" autocomplete="off">
-        </label>
-        <button type="submit" class="btn s">Enregistrer</button>
-      </form>
-      <p class="muted small">Essayée pendant 2 minutes ; statut HTTP inférieur à 400 attendu ; certificat non vérifié (homelab). Vide : pas de vérification HTTP.</p>
-    </section>
-    {{end}}
     {{with .Row.Det}}
     <section class="card">
       <h2>Système</h2>
@@ -146,6 +124,28 @@
         {{if .Docker}}<dt>Docker</dt><dd>{{.Containers}} conteneur(s){{with .DockerInfo.Compose}} · compose {{.}}{{end}}{{if .DockerInfo.Updates}} · <a href="?onglet=docker"><span class="b w">{{.DockerInfo.Updates}} image(s) à mettre à jour</span></a>{{else if .DockerInfo.List}} · <a href="?onglet=docker">détail</a>{{end}}</dd>{{end}}
         {{range .Snap.Storages}}<dt>Stockage</dt><dd>{{.Name}} ({{.Type}}){{if ge .UsedPct 0.0}} : {{pct .UsedPct}} %{{end}}</dd>{{end}}
       </dl>
+    </section>
+    {{end}}
+    <section class="card">
+      <h2>Historique</h2>
+      {{if .Jobs}}<div class="tl">
+        {{range $i, $j := .Jobs}}{{if lt $i 5}}<div class="tev {{evClass .Status}}"><a href="/taches/{{.ID}}">{{.Kind}}{{if .DryRun}} (simulation){{end}}</a>{{if .Error}} · <span class="crit">{{.Error}}</span>{{else if .Summary}} · {{.Summary}}{{end}}<div class="t">{{when .CreatedAt}} · {{.RequestedBy}} · {{.Status}}</div></div>{{end}}{{end}}
+      </div>
+      {{if gt (len .Jobs) 5}}<a href="?onglet=historique">Tout l'historique →</a>{{end}}
+      {{else}}<p class="muted">Aucune tâche.</p>{{end}}
+    </section>
+    {{if or (eq .Row.Type "lxc") (eq .Row.Type "qemu")}}
+    <section class="card">
+      <h2>Vérification après une opération</h2>
+      <p class="small">Après chaque mise à jour ou redémarrage réel, PatchWarden compare l'invité à son état d'avant : services systemd en échec, conteneurs arrêtés ou en mauvaise santé. En cas de problème, la tâche échoue et le retour arrière est proposé (jamais lancé seul).</p>
+      <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/verification" class="inline-form">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label class="small">Adresse qui doit répondre ensuite (facultatif)
+          <input type="url" name="url" value="{{.CheckURL}}" placeholder="https://paperless.lan" autocomplete="off">
+        </label>
+        <button type="submit" class="btn s">Enregistrer</button>
+      </form>
+      <p class="muted small">Essayée pendant 2 minutes ; statut HTTP inférieur à 400 attendu ; certificat non vérifié (homelab). Vide : pas de vérification HTTP.</p>
     </section>
     {{end}}
   </div>

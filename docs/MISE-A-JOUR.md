@@ -62,6 +62,8 @@ nouveau JavaScript (sur téléphone : vider le cache du site, ou fermer et rouvr
 | Symptôme | Piste |
 | :--- | :--- |
 | `git pull` refuse (« not possible to fast-forward ») | Une modification locale existe dans `/root/Patchwarden` : `git status`, puis `git stash` ou `git checkout -- <fichier>` |
+| `patchwarden: command not found` alors que `/usr/local/bin/patchwarden` existe | Le `PATH` du shell ne contient plus `/usr/local/bin` (`echo $PATH`). Tout de suite : `export PATH=/usr/local/sbin:/usr/local/bin:$PATH`. Pour de bon : retrouver la ligne qui écrase le `PATH` (`grep -n PATH ~/.bashrc ~/.profile ~/.bash_profile`) et y garder `/usr/local/bin`. Le service n'est pas touché : il lance le chemin complet |
+| Disque du CT 103 qui se remplit | Le cache de compilation de Go grossit à chaque `make build` : `go clean -cache` le vide sans risque |
 | `make build` : `go: command not found` | Go absent du PATH (installé depuis l'archive officielle) : `export PATH=$PATH:/usr/local/go/bin` |
 | Le service ne redémarre pas | `journalctl -u patchwarden -n 50` : une clé inconnue ou invalide dans `config.toml` est nommée dans le message |
 | `check-config` : wrapper trop ancien | Étape 2 non faite, ou faite sur un seul nœud : comparer les `sha256sum` |

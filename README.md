@@ -19,6 +19,7 @@ de mémoire, sans agent dans les invités.
 | 7 | VMs (guest agent), OMV/PBS, fin de support des OS | ✅ |
 | 8 | Docker : stacks Portainer (API), projets docker compose, comparaison aux registres | ✅ (à recetter) |
 | 9 | Vérification après mise à jour, fenêtres de maintenance, sécurité automatique (désactivée par défaut), métriques Prometheus | ✅ (à recetter) |
+| 10 | Invités arrêtés (démarrer, mettre à jour, arrêter), nettoyage des images Docker, images Docker dans les notifications, procédure de migration VLAN | ✅ (à recetter) |
 
 Les décisions et les résultats de la sonde sont dans [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -406,6 +407,23 @@ services en échec, support de l'OS, âge de la détection, snapshots ; plus les
 et résultat. Tableau de bord Grafana d'exemple : [deploy/grafana-dashboard.json](deploy/grafana-dashboard.json)
 (Dashboards → Importer).
 
+### 10. Invités arrêtés, nettoyage Docker, migration VLAN
+
+**Invité arrêté** : sa fiche propose « Démarrer, mettre à jour, arrêter ». PatchWarden le
+démarre, le détecte, établit le plan sur cette détection, applique « Sécurité uniquement » ou
+« Tout mettre à jour » (ou les simule), vérifie le résultat, puis l'arrête proprement, même en
+cas d'échec (jamais d'arrêt forcé : si l'arrêt propre échoue, la tâche le dit et l'invité reste
+démarré). Confirmation renforcée pour les invités critiques, OMV et PBS.
+
+**Nettoyage Docker** : les mises à jour laissent les anciennes versions des images, sans nom.
+L'onglet Docker les compte et propose « Lister » ou « Nettoyer » (`docker image prune -f` :
+jamais une image qui a un nom, même inutilisée) ; « À traiter » le signale à partir de 3.
+
+**Notifications** : la détection planifiée signale aussi les nouvelles images Docker, dans le
+message « applis ».
+
+**Migration VLAN** : voir [docs/MIGRATION-VLAN.md](docs/MIGRATION-VLAN.md).
+
 ### Mettre à jour PatchWarden
 
 Aide-mémoire complet (PatchWarden, wrapper, vérification, problèmes courants) :
@@ -446,7 +464,7 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v11) | Effet |
+| Verbe (wrapper v12) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
@@ -459,7 +477,10 @@ le wrapper, relisible sur le nœud.
 | `lxc-restart-services <vmid>` | Dans le CT : `systemctl restart` des services encore liés à une bibliothèque remplacée (liste établie dans le CT, jamais transmise par PatchWarden ; dbus, `systemd-*`, sessions et consoles exclus) |
 | `lxc-reboot <vmid>` | `pct reboot` du CT, puis attente qu'il soit de nouveau démarré |
 | `lxc-docker-compose <vmid> <projet> <0\|1>` | Dans l'invité : retrouve le dossier et les fichiers du projet compose dans les labels de ses conteneurs (rien n'est transmis par PatchWarden), refuse une stack Portainer, puis `docker compose pull` et `up -d --no-deps` des seuls services démarrés. `1` = simulation (`docker compose config`) |
-| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
+| `lxc-start <vmid>` | `pct start` d'un CT arrêté (refus, code 54, s'il tourne déjà), puis attente qu'il soit démarré |
+| `lxc-shutdown <vmid>` | `pct shutdown --timeout 180` : arrêt propre, jamais forcé ; en cas d'échec, le CT reste démarré (code 55) |
+| `lxc-docker-prune <vmid> <0\|1>` | Dans l'invité : `docker image prune -f`, images sans nom seulement (anciennes versions), jamais une image avec un nom. `1` = liste seule |
+| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose`, `vm-start`, `vm-shutdown`, `vm-docker-prune` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
 | Modes de `*-apt` | `security`, `full`, et pour les produits particuliers `dist` (PBS : `apt-get dist-upgrade`) et `omv` (OpenMediaVault : `omv-upgrade`) ; ces deux modes refusent toute mise à jour qui supprimerait un paquet (code 22) |
 
 La détection lit aussi les services systemd en échec (`systemctl list-units --state=failed`)
@@ -479,7 +500,7 @@ connexion SSH est perdue (redémarrage de PatchWarden, réseau), l'opération se
 même, ressources restaurées comprises. Leur journal complet reste 30 jours sur le nœud dans
 `/var/log/patchwarden/`. Le wrapper écrit donc sur l'hôte uniquement ce journal et un fichier
 de verrou dans `/run/lock`, et lance `pct set` (ressources), `pct snapshot`,
-`pct delsnapshot`, `pct rollback`, `pct start` et `pct reboot` sur le CT visé, ou leurs
+`pct delsnapshot`, `pct rollback`, `pct start`, `pct reboot` et `pct shutdown` sur le CT visé, ou leurs
 équivalents `qm` pour une VM (plus `qm agent ping` et `qm guest exec`) ; rien d'autre.
 La détection lit aussi, dans le CT, `/proc/*/maps` et `/proc/*/cgroup` pour repérer les
 processus encore liés à une bibliothèque remplacée (lecture seule).

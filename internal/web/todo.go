@@ -164,6 +164,9 @@ func buildTodo(snap inventory.Snapshot, all map[string]detect.Result, now time.T
 			t.Versions++
 			dock.Items = append(dock.Items, it)
 		}
+		if n := det.DockerInfo.Dangling; n >= 3 {
+			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: plural(n, "image Docker sans nom (ancienne version) à nettoyer", "images Docker sans nom (anciennes versions) à nettoyer"), Tag: "Docker", Link: guestLink(g, "docker")})
+		}
 		for _, w := range det.DockerInfo.Watchtower {
 			maint.Items = append(maint.Items, todoItem{Guest: g, Icon: icon, Text: "Watchtower démarré : il met les images à jour en parallèle, arrêtez-le", Code: w, Tag: "Watchtower", TagClass: "w", Link: guestLink(g, "docker")})
 		}

@@ -395,3 +395,4 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
 .check.choice:has(input:checked) { border-color: var(--sel-line); background: var(--sel); }
 .warn-text { color: var(--warn); }
 .schedule { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.prune { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; }

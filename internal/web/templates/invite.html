@@ -100,7 +100,26 @@
     {{end}}
   </section>
   {{end}}{{end}}
-  {{if not .Full}}<section class="card"><h2>Mises à jour</h2><p class="muted">{{if .Row.Why}}Indisponibles : {{.Row.Why}}{{else}}Indisponibles pour cet invité.{{end}}</p></section>{{end}}
+  {{if .CanCycle}}
+  <section class="card">
+    <h2>Invité arrêté</h2>
+    <p class="small">PatchWarden peut le démarrer, le détecter, appliquer la mise à jour choisie (ou la simuler), le vérifier, puis l'arrêter proprement, même en cas d'échec. Le plan est établi après le démarrage, sur une détection du jour.</p>
+    <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/cycle">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="small">Mise à jour
+        <select name="action"><option value="securite">sécurité uniquement</option><option value="complet">tout mettre à jour</option></select>
+      </label>
+      {{with .Row.Det}}{{if .Snap.Possible}}<label class="check spaced"><input type="checkbox" name="snapshot" value="1"> <span>Prendre un snapshot avant la mise à jour</span></label>{{end}}{{end}}
+      <label class="check spaced"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : démarrer <strong>{{.Row.Name}}</strong>, le mettre à jour puis l'arrêter</span></label>
+      {{if .CycleNeedName}}<label class="small">Confirmation renforcée : saisissez le nom de l'invité (<code>{{.Row.Name}}</code>)
+        <input name="nom" required autocomplete="off" pattern="{{.Row.Name}}"></label>{{end}}
+      <div class="snapacts spaced">
+        <button type="submit" name="simulation" value="1" class="btn sec2" formnovalidate>Simuler (démarre et arrête l'invité)</button>
+        <button type="submit" name="simulation" value="0" class="btn d">Démarrer, mettre à jour, arrêter</button>
+      </div>
+    </form>
+  </section>
+  {{else if not .Full}}<section class="card"><h2>Mises à jour</h2><p class="muted">{{if .Row.Why}}Indisponibles : {{.Row.Why}}{{else}}Indisponibles pour cet invité.{{end}}</p></section>{{end}}
   {{if gt .Missing 0}}<p class="alert alert-warn">Le script pose des questions sans terminal : <a href="?onglet=questions">enregistrez une réponse pour chacune</a> avant de mettre à jour l'application.</p>{{end}}
   </div>
   <div>
@@ -190,6 +209,15 @@
   {{range .DockerInfo.Watchtower}}<p class="alert alert-warn">Watchtower est démarré (<code>{{.}}</code>) : il met les images à jour de son côté. Arrêtez-le pour que PatchWarden reste juste.</p>{{end}}
   {{with $.Docker}}{{if .OK}}<p><a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker">Mettre à jour tout ce qui peut l'être ({{len .Groups}})…</a></p>{{end}}{{end}}
   <p class="muted small">Seules les images du tag utilisé sont mises à jour. Une version plus récente publiée sous un autre tag est signalée, jamais appliquée : changez le tag vous-même après lecture du changelog.</p>
+  {{if .DockerInfo.Dangling}}
+  <form method="post" action="/invites/{{$.Row.Node}}/{{$.Row.VMID}}/docker/nettoyer" class="prune spaced">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <span class="small"><b>{{.DockerInfo.Dangling}}</b> image(s) sans nom : anciennes versions laissées par les mises à jour. Les supprimer libère de la place ; aucune image avec un nom n'est touchée.</span>
+    <label class="check small"><input type="checkbox" name="confirme" value="1" required> confirmer</label>
+    <button type="submit" name="simulation" value="1" class="btn s sec2" formnovalidate>Lister</button>
+    <button type="submit" name="simulation" value="0" class="btn s">Nettoyer</button>
+  </form>
+  {{end}}
   {{if $.DockerGroups}}
   <h3 class="spaced">Tous les conteneurs</h3>
   <div class="tablewrap"><table>

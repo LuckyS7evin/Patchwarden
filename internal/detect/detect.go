@@ -243,7 +243,7 @@ func Parse(lines []string) (Result, error) {
 			r.Docker = v == "1"
 		case "docker.containers":
 			r.Containers = atoi(v)
-		case "docker.compose", "docker.ctr", "docker.img", "docker.ref":
+		case "docker.compose", "docker.ctr", "docker.img", "docker.ref", "docker.dangling":
 			r.DockerInfo.parseLine(k, v, images, refs)
 		case "docker.health":
 			if name, st, ok := strings.Cut(v, "|"); ok {

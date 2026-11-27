@@ -47,6 +47,7 @@ delsnapshot)
 rollback) echo "pct rollback $2 $3" >> "$PCT_SET_LOG"; touch "$FAKE_GUEST/stopped"; exit 0 ;;
 reboot) echo "pct reboot $2 $3 $4" >> "$PCT_SET_LOG"; [ -n "$FAKE_REBOOT_FAIL" ] && exit 1; rm -rf "$FAKE_GUEST/proc/"[0-9]*; exit 0 ;;
 start) echo "pct start $2" >> "$PCT_SET_LOG"; rm -f "$FAKE_GUEST/stopped"; exit 0 ;;
+shutdown) echo "pct shutdown $2 $3 $4" >> "$PCT_SET_LOG"; touch "$FAKE_GUEST/stopped"; exit 0 ;;
 set)
 	shift 2; echo "pct set $*" >> "$PCT_SET_LOG"
 	# Comme Proxmox : la mémoire est vue tout de suite par le CT, les CPU

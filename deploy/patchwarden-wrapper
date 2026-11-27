@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 11) :
+# Verbes (version 12) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -46,8 +46,14 @@
 #                                          et fichiers lus dans les labels des conteneurs, dans
 #                                          l'invité : PatchWarden ne transmet que le nom du projet
 #
+#   lxc-start <vmid>                       démarre un CT arrêté (refus, code 54, s'il tourne déjà)
+#   lxc-shutdown <vmid>                    arrêt propre du CT (pct shutdown, jamais d'arrêt forcé)
+#   lxc-docker-prune <vmid> <0|1>          supprime les images Docker sans nom (anciennes
+#                                          versions laissées par les mises à jour) ; 1 = liste seule
+#
 #   vm-detect, vm-apt, vm-snapshot, vm-snapdel, vm-rollback, vm-restart-services,
-#   vm-reboot, vm-docker-compose : mêmes arguments et mêmes effets pour une VM. Les scripts y sont
+#   vm-reboot, vm-docker-compose, vm-start, vm-shutdown, vm-docker-prune : mêmes
+#   arguments et mêmes effets pour une VM. Les scripts y sont
 #   exécutés par l'agent invité QEMU (qm guest exec, script sur l'entrée
 #   standard) ; les opérations longues tournent en arrière-plan dans la VM et
 #   leur journal est relu toutes les 2 s.
@@ -64,14 +70,15 @@
 # jour supprimerait des paquets (refusée), 60 docker absent, 61 docker compose v2
 # absent, 62 projet compose introuvable, 63 projet géré par Portainer, 64 dossier ou
 # fichiers du projet introuvables, 65 configuration compose invalide, 66 échec du
-# pull, 67 échec de up -d, 68 aucun service du projet démarré,
+# pull, 67 échec de up -d, 68 aucun service du projet démarré, 53 échec du
+# démarrage, 54 invité déjà démarré, 55 arrêt propre impossible,
 # autre : code renvoyé par la commande exécutée dans l'invité.
 # ==============================================================================
 
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=11
+WRAPPER_VERSION=12
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -345,6 +352,7 @@ if has docker && docker info </dev/null >/dev/null 2>&1; then
 	kv docker.present 1
 	kv docker.containers "$(docker ps -aq </dev/null 2>/dev/null | wc -l)"
 	kv docker.compose "$(docker compose version --short </dev/null 2>/dev/null | head -n 1)"
+	kv docker.dangling "$(docker image ls -q -f dangling=true </dev/null 2>/dev/null | wc -l)"
 	# Un conteneur par ligne : id|nom|image|id d'image|état|projet|service|dossier|fichiers|version|source.
 	ids="$(docker ps -aq --no-trunc </dev/null 2>/dev/null | head -n 200)"
 	if [ -n "$ids" ]; then
@@ -562,6 +570,27 @@ if ! docker compose -p "$P" "$@" up -d --no-deps $svcs </dev/null 2>&1; then ech
 docker compose -p "$P" "$@" ps </dev/null 2>&1 | sed 's/^/PW:   /'
 exit 0
 COMPOSEUP_EOF
+
+# ------------------------------------------------------------------------------
+# Nettoyage des images Docker sans nom DANS l'invité : anciennes versions
+# laissées par les mises à jour (jamais une image avec un nom, même inutilisée).
+# $1 = 1 pour lister seulement.
+# ------------------------------------------------------------------------------
+read -r -d '' DOCKERPRUNE <<'DOCKERPRUNE_EOF'
+DRY="$1"
+export LC_ALL=C
+if ! command -v docker >/dev/null 2>&1; then echo "PW-ERREUR: docker absent de cet invité"; exit 60; fi
+n="$(docker image ls -q -f dangling=true </dev/null 2>/dev/null | wc -l)"
+echo "PW: images sans nom (anciennes versions) : $n"
+docker image ls -f dangling=true --format 'PW:   {{.ID}} · créée {{.CreatedSince}} · {{.Size}}' </dev/null 2>/dev/null | head -n 50
+if [ "$DRY" = 1 ]; then
+	echo "PW: simulation : rien n'est supprimé"
+	exit 0
+fi
+docker image prune -f </dev/null 2>&1
+echo "pw.pruned=$n"
+exit 0
+DOCKERPRUNE_EOF
 
 # ------------------------------------------------------------------------------
 # Exécution d'un script dans l'invité (script sur l'entrée standard).
@@ -982,13 +1011,69 @@ run_reboot() {
 	[[ "$st" == "status: running" ]] || exit 52
 }
 
+run_start() {
+	local st i
+	log "${VERB} ${VMID}"
+	st="$("$TOOL" status "$VMID" 2>/dev/null)"
+	if [[ "$st" == "status: running" ]]; then
+		echo "PW-ERREUR: l'invité ${VMID} est déjà démarré"
+		exit 54
+	fi
+	echo "PW: démarrage de l'invité ${VMID} (${TOOL} start)"
+	if ! timeout 300 "$TOOL" start "$VMID" </dev/null; then
+		echo "PW-ERREUR: ${TOOL} start a échoué"
+		exit 53
+	fi
+	for ((i = 0; i < 60; i++)); do
+		st="$("$TOOL" status "$VMID" 2>/dev/null)"
+		[[ "$st" == "status: running" ]] && break
+		sleep "$RES_POLL"
+	done
+	if [[ "$st" != "status: running" ]]; then
+		echo "PW-ERREUR: l'invité n'est pas démarré (${st#status: })"
+		exit 53
+	fi
+	if [[ "$GT" == vm ]]; then
+		for ((i = 0; i < 90; i++)); do
+			if timeout 20 qm agent "$VMID" ping </dev/null >/dev/null 2>&1; then
+				echo "PW: agent invité joignable"
+				break
+			fi
+			sleep "$RES_POLL"
+		done
+	fi
+	echo "PW: état après : running"
+}
+
+run_shutdown() {
+	local st i
+	log "${VERB} ${VMID}"
+	echo "PW: arrêt propre de l'invité ${VMID} (${TOOL} shutdown)"
+	if ! timeout 300 "$TOOL" shutdown "$VMID" --timeout 180 </dev/null; then
+		echo "PW-ERREUR: arrêt propre impossible : l'invité reste démarré (à arrêter à la main)"
+		exit 55
+	fi
+	for ((i = 0; i < 60; i++)); do
+		st="$("$TOOL" status "$VMID" 2>/dev/null)"
+		[[ "$st" == "status: stopped" ]] && break
+		sleep "$RES_POLL"
+	done
+	echo "PW: état après : ${st#status: }"
+	[[ "$st" == "status: stopped" ]] || exit 55
+}
+
+run_docker_prune() {
+	log "${VERB} ${VMID} simulation=${ARGS[2]}"
+	g_stream 900 "${ARGS[2]}" <<<"$DOCKERPRUNE"
+}
+
 run_docker_compose() {
 	log "${VERB} ${VMID} ${ARGS[2]} simulation=${ARGS[3]}"
 	g_stream "$TIMEOUT_UPDATE" "${ARGS[2]}" "${ARGS[3]}" <<<"$COMPOSEUP"
 }
 
 # Verbes disponibles pour les VM (pas d'appli community-scripts dans une VM).
-if [[ "$GT" == vm && ! "$BASE" =~ ^(detect|apt|snapshot|snapdel|rollback|restart-services|reboot|docker-compose)$ ]]; then
+if [[ "$GT" == vm && ! "$BASE" =~ ^(detect|apt|snapshot|snapdel|rollback|restart-services|reboot|docker-compose|start|shutdown|docker-prune)$ ]]; then
 	refuse "verbe indisponible pour une VM : ${VERB}"
 fi
 
@@ -1078,6 +1163,26 @@ reboot)
 	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : ${VERB} <vmid>"
 	check_guest "${ARGS[1]}"
 	run_detached reboot run_reboot
+	;;
+start)
+	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : ${VERB} <vmid>"
+	check_guest_exists "${ARGS[1]}"
+	run_detached start run_start
+	;;
+shutdown)
+	[[ ${#ARGS[@]} -eq 2 ]] || refuse "usage : ${VERB} <vmid>"
+	check_guest_exists "${ARGS[1]}"
+	run_detached shutdown run_shutdown
+	;;
+docker-prune)
+	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : ${VERB} <vmid> <0|1>"
+	[[ "${ARGS[2]}" =~ ^[01]$ ]] || refuse "simulation attendue : 0 ou 1"
+	check_guest "${ARGS[1]}"
+	if [[ "${ARGS[2]}" == 1 ]]; then
+		run_docker_prune
+		exit $?
+	fi
+	run_detached docker-prune run_docker_prune
 	;;
 docker-compose)
 	[[ ${#ARGS[@]} -eq 4 ]] || refuse "usage : ${VERB} <vmid> <projet> <0|1>"

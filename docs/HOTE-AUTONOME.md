@@ -95,7 +95,7 @@ La clé de PatchWarden est celle des nœuds (`/etc/patchwarden/id_ed25519`). Aff
 partie publique, dans le CT 103 :
 
 ```bash
-cat /etc/patchwarden/id_ed25519.pub
+ssh-keygen -y -f /etc/patchwarden/id_ed25519      # pas de fichier .pub : recalculée depuis la clé privée
 ```
 
 Copiez cette ligne (copier-coller dans le terminal suffit, il n'y a pas de fichier à

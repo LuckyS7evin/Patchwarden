@@ -116,6 +116,11 @@ cache_ttl = "6h"
 # [docker]
 # registry_check = true
 # cache_ttl = "6h"
+# Seuls registres interrogés (défaut : docker.io, ghcr.io, lscr.io, quay.io, gcr.io,
+# registry.gitlab.com, codeberg.org, public.ecr.aws, mcr.microsoft.com, docker.elastic.co,
+# registry.k8s.io). La référence d'une image vient de l'invité : la liste empêche un invité
+# compromis de faire contacter n'importe quelle adresse à PatchWarden.
+# registries = ["docker.io", "ghcr.io", "lscr.io"]
 
 # Instances Portainer : leurs stacks sont mises à jour par l'API (re-déploiement avec
 # téléchargement des images, même fichier, mêmes variables). Une section par instance ;

@@ -101,7 +101,14 @@ type Docker struct {
 	RegistryCheck *bool `toml:"registry_check"`
 	// CacheTTL : durée de validité des réponses des registres. Défaut : 6h.
 	CacheTTL Duration `toml:"cache_ttl"`
+	// Registries : seuls registres que PatchWarden interroge. La référence
+	// d'une image vient de l'invité : la restreindre évite qu'un invité
+	// compromis fasse contacter n'importe quelle adresse à PatchWarden.
+	Registries []string `toml:"registries"`
 }
+
+// DefaultRegistries : registres publics interrogés par défaut.
+var DefaultRegistries = []string{"docker.io", "ghcr.io", "lscr.io", "quay.io", "gcr.io", "registry.gitlab.com", "codeberg.org", "public.ecr.aws", "mcr.microsoft.com", "docker.elastic.co", "registry.k8s.io"}
 
 // Portainer est une instance Portainer : ses stacks sont mises à jour par
 // son API (re-déploiement avec téléchargement des images). Les invités sont
@@ -391,6 +398,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Docker.CacheTTL.Duration == 0 {
 		c.Docker.CacheTTL.Duration = 6 * time.Hour
+	}
+	if c.Docker.Registries == nil {
+		c.Docker.Registries = append([]string(nil), DefaultRegistries...)
 	}
 	if c.Upstream.GitHubAPI == "" {
 		c.Upstream.GitHubAPI = "https://api.github.com"

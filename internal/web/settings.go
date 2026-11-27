@@ -81,7 +81,10 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, se *sessio
 		setting{"snapshots.keep", itoa(keep), "snapshots PatchWarden gardés par invité"},
 		setting{"snapshots.max_storage_pct", itoa(maxPct) + " %", "snapshot refusé au-delà"},
 	)
-	dock := []setting{{"docker.registry_check", yes(c.Docker.RegistryCheck == nil || *c.Docker.RegistryCheck), "comparaison des images aux registres (empreinte du tag, versions plus récentes)"}}
+	dock := []setting{
+		{"docker.registry_check", yes(c.Docker.RegistryCheck == nil || *c.Docker.RegistryCheck), "comparaison des images aux registres (empreinte du tag, versions plus récentes)"},
+		{"docker.registries", strings.Join(c.Docker.Registries, ", "), "seuls registres interrogés ; une image d'un autre registre reste « inconnu »"},
+	}
 	for _, p := range c.Portainer {
 		tok := "absent"
 		if p.Token != "" {

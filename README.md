@@ -424,6 +424,9 @@ message « applis ».
 
 **Migration VLAN** : voir [docs/MIGRATION-VLAN.md](docs/MIGRATION-VLAN.md).
 
+**Sécurité** : modèle de menace, protections, risques acceptés et recommandations dans
+[docs/SECURITE.md](docs/SECURITE.md).
+
 ### Mettre à jour PatchWarden
 
 Aide-mémoire complet (PatchWarden, wrapper, vérification, problèmes courants) :
@@ -464,7 +467,7 @@ Il ne vise que des CT **présents sur ce nœud et démarrés**, jamais l'hôte. 
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v12) | Effet |
+| Verbe (wrapper v13) | Effet |
 | :--- | :--- |
 | `ping` | Aucun (version du wrapper, nom du nœud) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
@@ -480,7 +483,7 @@ le wrapper, relisible sur le nœud.
 | `lxc-start <vmid>` | `pct start` d'un CT arrêté (refus, code 54, s'il tourne déjà), puis attente qu'il soit démarré |
 | `lxc-shutdown <vmid>` | `pct shutdown --timeout 180` : arrêt propre, jamais forcé ; en cas d'échec, le CT reste démarré (code 55) |
 | `lxc-docker-prune <vmid> <0\|1>` | Dans l'invité : `docker image prune -f`, images sans nom seulement (anciennes versions), jamais une image avec un nom. `1` = liste seule |
-| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose`, `vm-start`, `vm-shutdown`, `vm-docker-prune` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (fichiers dans `/var/tmp`, supprimés à la fin) et journal relu toutes les 2 s |
+| `vm-detect`, `vm-apt`, `vm-snapshot`, `vm-snapdel`, `vm-rollback`, `vm-restart-services`, `vm-reboot`, `vm-docker-compose`, `vm-start`, `vm-shutdown`, `vm-docker-prune` | Mêmes arguments et effets pour une VM : `qm guest exec` (agent invité, script sur l'entrée standard), `qm snapshot`/`delsnapshot`/`rollback`/`start`/`reboot`. Opérations longues lancées en arrière-plan dans la VM (dossier créé par `mktemp -d` dans `/var/tmp`, supprimé à la fin) et journal relu toutes les 2 s |
 | Modes de `*-apt` | `security`, `full`, et pour les produits particuliers `dist` (PBS : `apt-get dist-upgrade`) et `omv` (OpenMediaVault : `omv-upgrade`) ; ces deux modes refusent toute mise à jour qui supprimerait un paquet (code 22) |
 
 La détection lit aussi les services systemd en échec (`systemctl list-units --state=failed`)

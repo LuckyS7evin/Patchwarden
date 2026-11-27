@@ -51,6 +51,8 @@ type Engine struct {
 	EOL *eol.Checker
 	// Registry : comparaison des images Docker aux registres (nil : désactivée).
 	Registry *registry.Client
+	// Registries : registres autorisés (vide : tous, pour les tests).
+	Registries map[string]bool
 	// Portainers : instances Portainer par nom ([[portainer]]), dans l'ordre
 	// de la configuration (PortainerOrder).
 	Portainers     map[string]Portainer
@@ -90,7 +92,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 12
+const WrapperVersion = 13
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {

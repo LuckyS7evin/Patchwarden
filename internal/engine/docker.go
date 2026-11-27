@@ -99,6 +99,11 @@ func (e *Engine) checkImages(ctx context.Context, d *detect.Docker, log jobs.Log
 			continue
 		}
 		c.ChangelogURL = registry.ChangelogURL(ref, c.Source)
+		if len(e.Registries) > 0 && !e.Registries[ref.Registry] {
+			c.Check, c.CheckText = detect.CheckUnknown, "registre non autorisé : "+ref.Registry+" (à ajouter dans [docker] registries)"
+			log(false, fmt.Sprintf("  %s : %s", c.Name, c.CheckText))
+			continue
+		}
 		switch {
 		case ref.Digest != "":
 			c.Check, c.CheckText = detect.CheckPinned, "image fixée par empreinte (@sha256) : aucune mise à jour à suivre"

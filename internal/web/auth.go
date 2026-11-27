@@ -113,6 +113,13 @@ func (t *throttle) fail(ip string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
+	if len(t.m) > 1000 { // ménage : la table ne grossit pas sans limite
+		for k, a := range t.m {
+			if now.Sub(a.first) > t.window && now.After(a.blockedUntil) {
+				delete(t.m, k)
+			}
+		}
+	}
 	a, ok := t.m[ip]
 	if !ok || now.Sub(a.first) > t.window {
 		a = &attempts{first: now}

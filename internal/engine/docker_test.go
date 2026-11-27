@@ -38,11 +38,19 @@ inspect)
 	case "$f" in
 	docker.ctr=*) cat "$D/ctr" ;;
 	"{{.Image}}") cut -d'|' -f4 "$D/ctr" ;;
+	"{{.Config.Image}}") cut -d'|' -f3 "$D/ctr" ;;
 	*working_dir*) id="$4"; awk -F'|' -v id="$id" 'index($1, id) { print $8 }' "$D/ctr" ;;
 	*config_files*) id="$4"; awk -F'|' -v id="$id" 'index($1, id) { print $9 }' "$D/ctr" ;;
 	*) echo "" ;;
 	esac ;;
-image) cat "$D/img" ;;
+image)
+	# docker image inspect --format … <id ou référence> : empreintes, séparées par des virgules.
+	a="${@: -1}"
+	case "$a" in
+	sha256:*) id="$a" ;;
+	*) id="$(awk -F'|' -v r="$a" '$3 == r { print $4; exit }' "$D/ctr")" ;;
+	esac
+	awk -F'|' -v id="$id" '{ k = $1; sub(/^docker.img=/, "", k); if (k == id) printf "%s,", $2 }' "$D/img" ;;
 compose)
 	shift
 	[ "$1" = version ] && { echo "2.29.1"; exit 0; }

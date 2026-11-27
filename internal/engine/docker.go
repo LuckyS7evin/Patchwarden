@@ -425,7 +425,7 @@ func (e *Engine) PlanDocker(g inventory.Guest, keys []string) DockerPlan {
 		return p
 	}
 	if !d.Checked {
-		p.Blockers = append(p.Blockers, "images non comparées aux registres : relancez une détection (comparaison activée, wrapper v9 requis)")
+		p.Blockers = append(p.Blockers, "images non comparées aux registres : relancez une détection (comparaison activée, wrapper v10 requis)")
 		return p
 	}
 	if len(keys) == 0 {

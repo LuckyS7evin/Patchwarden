@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 9) :
+# Verbes (version 10) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -71,7 +71,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=9
+WRAPPER_VERSION=10
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -346,11 +346,19 @@ if has docker && docker info </dev/null >/dev/null 2>&1; then
 	if [ -n "$ids" ]; then
 		# shellcheck disable=SC2086
 		docker inspect --format 'docker.ctr={{.Id}}|{{.Name}}|{{.Config.Image}}|{{.Image}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project.working_dir"}}|{{index .Config.Labels "com.docker.compose.project.config_files"}}|{{index .Config.Labels "org.opencontainers.image.version"}}|{{index .Config.Labels "org.opencontainers.image.source"}}' $ids </dev/null 2>/dev/null | tr -d '\r'
-		# Empreintes (digests) des images, telles que téléchargées du registre.
+		# Empreintes (digests) des images, telles que téléchargées du registre :
+		# par identifiant d'image du conteneur, puis par référence (avec le
+		# magasin d'images containerd, l'identifiant vu par le conteneur peut
+		# différer de celui de l'image). Une image par appel : une image
+		# disparue ne fait pas échouer les autres.
 		# shellcheck disable=SC2086
-		imgs="$(docker inspect --format '{{.Image}}' $ids </dev/null 2>/dev/null | sort -u)"
+		for i in $(docker inspect --format '{{.Image}}' $ids </dev/null 2>/dev/null | sort -u); do
+			printf 'docker.img=%s|%s\n' "$i" "$(docker image inspect --format '{{range .RepoDigests}}{{.}},{{end}}' "$i" </dev/null 2>/dev/null | tr -d '\r\n')"
+		done
 		# shellcheck disable=SC2086
-		[ -n "$imgs" ] && docker image inspect --format 'docker.img={{.Id}}|{{join .RepoDigests ","}}' $imgs </dev/null 2>/dev/null | tr -d '\r'
+		for r in $(docker inspect --format '{{.Config.Image}}' $ids </dev/null 2>/dev/null | sort -u); do
+			printf 'docker.ref=%s|%s\n' "$r" "$(docker image inspect --format '{{range .RepoDigests}}{{.}},{{end}}' "$r" </dev/null 2>/dev/null | tr -d '\r\n')"
+		done
 	fi
 else
 	kv docker.present 0

@@ -253,7 +253,7 @@ func kindOrder(k string) int {
 }
 
 // parseDocker interprète une ligne docker.ctr ou docker.img.
-func (d *Docker) parseLine(k, v string, images map[string][]string) {
+func (d *Docker) parseLine(k, v string, images, refs map[string][]string) {
 	clean := func(s string) string {
 		if s == "<no value>" {
 			return ""
@@ -277,14 +277,18 @@ func (d *Docker) parseLine(k, v string, images map[string][]string) {
 			State: clean(f[4]), Project: clean(f[5]), Service: clean(f[6]), WorkDir: clean(f[7]),
 			ConfigFiles: clean(f[8]), Version: clean(f[9]), Source: clean(f[10]),
 		})
-	case "docker.img":
-		id, digests, ok := strings.Cut(v, "|")
+	case "docker.img", "docker.ref":
+		key, digests, ok := strings.Cut(v, "|")
 		if !ok {
 			return
 		}
+		m := images
+		if k == "docker.ref" {
+			m = refs
+		}
 		for _, s := range strings.Split(digests, ",") {
 			if s = clean(s); s != "" {
-				images[clean(id)] = append(images[clean(id)], s)
+				m[clean(key)] = append(m[clean(key)], s)
 			}
 		}
 	}

@@ -10,6 +10,7 @@ func TestParseDocker(t *testing.T) {
 		"docker.ctr=ccccccccccccffff|/beszel|henrygd/beszel|sha256:i3|exited|beszel|beszel|/opt/beszel|/opt/beszel/compose.yml||",
 		"docker.img=sha256:i1|ghcr.io/x/mealie@sha256:m1",
 		"docker.img=sha256:i2|",
+		"docker.ref=henrygd/beszel|henrygd/beszel@sha256:b1,",
 		"pw.end=1",
 	}
 	r, err := Parse(lines)
@@ -33,7 +34,7 @@ func TestParseDocker(t *testing.T) {
 	if g, _ := d.Group("compose-beszel"); g.Stopped != 1 {
 		t.Errorf("conteneur arrêté non compté : %+v", g)
 	}
-	if c, _ := d.Container("beszel"); c.Tag() != "latest" {
-		t.Errorf("tag par défaut : %s", c.Tag())
+	if c, _ := d.Container("beszel"); c.Tag() != "latest" || len(c.Digests) != 1 {
+		t.Errorf("tag par défaut, ou empreintes lues par référence : %+v", c)
 	}
 }

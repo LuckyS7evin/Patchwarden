@@ -165,7 +165,7 @@ var ErrIncomplete = errors.New("sortie de détection incomplète (marqueurs pw.d
 func Parse(lines []string) (Result, error) {
 	r := Result{Apt: Apt{IndexAgeHours: -1}}
 	var begin, end bool
-	images := map[string][]string{}
+	images, refs := map[string][]string{}, map[string][]string{}
 	for _, l := range lines {
 		k, v, ok := strings.Cut(l, "=")
 		if !ok {
@@ -240,8 +240,8 @@ func Parse(lines []string) (Result, error) {
 			r.Docker = v == "1"
 		case "docker.containers":
 			r.Containers = atoi(v)
-		case "docker.compose", "docker.ctr", "docker.img":
-			r.DockerInfo.parseLine(k, v, images)
+		case "docker.compose", "docker.ctr", "docker.img", "docker.ref":
+			r.DockerInfo.parseLine(k, v, images, refs)
 		}
 	}
 	if !begin || !end {
@@ -251,6 +251,11 @@ func Parse(lines []string) (Result, error) {
 	for i := range r.DockerInfo.List {
 		c := &r.DockerInfo.List[i]
 		c.Digests = images[c.ImageID]
+		if len(c.Digests) == 0 {
+			// Magasin d'images containerd : l'identifiant d'image vu par le
+			// conteneur peut ne pas être celui de l'image ; la référence suffit.
+			c.Digests = refs[c.Image]
+		}
 	}
 	r.DockerInfo.BuildGroups()
 	r.Snap, _ = ParseSnap(lines)

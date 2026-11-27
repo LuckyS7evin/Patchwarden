@@ -29,3 +29,17 @@
 
 {{define "ico-box"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/></svg>{{end}}
 {{define "ico-shield"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>{{end}}
+
+{{/* Cellules d'un conteneur Docker (onglet Docker) : image, état, registre, autre tag, changelog. */}}
+{{define "ctr-cells"}}
+      <td class="small"><code>{{.Image}}</code>{{with .Version}} <span class="muted">({{.}})</span>{{end}}</td>
+      <td>{{if .Running}}démarré{{else}}<span class="muted">{{.State}}</span>{{end}}</td>
+      <td>{{if eq .Check "update"}}<span class="b w" title="{{.CheckText}}">nouvelle image</span> <span class="muted small">{{since .Since}}</span>
+        {{- else if eq .Check "ok"}}<span class="b ok">à jour</span>
+        {{- else if eq .Check "local"}}<span class="b" title="{{.CheckText}}">image locale</span>
+        {{- else if eq .Check "pinned"}}<span class="b" title="{{.CheckText}}">épinglée</span>
+        {{- else if eq .Check "unknown"}}<span class="b" title="{{.CheckText}}">inconnu</span>
+        {{- else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{with .NewTag}}<span class="b v">{{.}}</span>{{end}}</td>
+      <td>{{with .ChangelogURL}}<a href="{{.}}" target="_blank" rel="noopener noreferrer">changelog ↗</a>{{end}}</td>
+{{end}}

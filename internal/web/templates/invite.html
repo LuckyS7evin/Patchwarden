@@ -171,10 +171,25 @@
   <h2>Conteneurs Docker</h2>
   <p>{{len .DockerInfo.List}} conteneur(s){{with .DockerInfo.Compose}} · docker compose {{.}}{{else}} · <span class="b w">docker compose v2 absent</span>{{end}}
     {{if .DockerInfo.Updates}} · <b>{{.DockerInfo.Updates}}</b> nouvelle(s) image(s){{end}}{{if .DockerInfo.Newer}} · {{.DockerInfo.Newer}} version(s) plus récente(s) sous un autre tag{{end}}</p>
-  {{if not .DockerInfo.Checked}}<p class="alert alert-warn">Images non comparées aux registres : relancez une détection ([docker] registry_check, wrapper v9).</p>{{end}}
+  {{if not .DockerInfo.Checked}}<p class="alert alert-warn">Images non comparées aux registres : relancez une détection ([docker] registry_check, wrapper v10).</p>{{end}}
   {{range .DockerInfo.Watchtower}}<p class="alert alert-warn">Watchtower est démarré (<code>{{.}}</code>) : il met les images à jour de son côté. Arrêtez-le pour que PatchWarden reste juste.</p>{{end}}
   {{with $.Docker}}{{if .OK}}<p><a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker">Mettre à jour tout ce qui peut l'être ({{len .Groups}})…</a></p>{{end}}{{end}}
   <p class="muted small">Seules les images du tag utilisé sont mises à jour. Une version plus récente publiée sous un autre tag est signalée, jamais appliquée : changez le tag vous-même après lecture du changelog.</p>
+  {{if $.DockerGroups}}
+  <h3 class="spaced">Tous les conteneurs</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Conteneur</th><th>Stack ou projet</th><th>Image</th><th>État</th><th>Registre</th><th>Autre tag</th><th>Changelog</th></tr></thead>
+    <tbody>
+    {{range $.DockerGroups}}{{$g := .}}{{range .Items}}
+    <tr>
+      <td>{{.Name}}{{if eq .Kind "watchtower"}} <span class="b w">Watchtower</span>{{end}}</td>
+      <td class="small">{{if eq $g.Kind "run"}}<span class="muted">docker run</span>{{else}}{{$g.Name}} <span class="muted">({{if eq $g.Kind "portainer"}}Portainer{{else}}compose{{end}})</span>{{end}}</td>
+      {{template "ctr-cells" .}}
+    </tr>
+    {{end}}{{end}}
+    </tbody>
+  </table></div>
+  {{end}}
 </section>
 {{range $.DockerGroups}}
 <section class="card">
@@ -187,21 +202,12 @@
   {{if and .Blocker .Updates}}<p class="small muted">{{.Blocker}}</p>{{end}}
   {{range .Warnings}}<p class="small alert alert-warn">{{.}}</p>{{end}}
   <div class="tablewrap"><table>
-    <thead><tr><th>Conteneur</th><th>Image</th><th>État</th><th>Registre</th><th>Autre tag</th><th></th></tr></thead>
+    <thead><tr><th>Conteneur</th><th>Image</th><th>État</th><th>Registre</th><th>Autre tag</th><th>Changelog</th></tr></thead>
     <tbody>
     {{range .Items}}
     <tr>
       <td>{{.Name}}{{if eq .Kind "watchtower"}} <span class="b w">Watchtower</span>{{end}}</td>
-      <td class="small"><code>{{.Image}}</code>{{with .Version}} <span class="muted">({{.}})</span>{{end}}</td>
-      <td>{{if .Running}}démarré{{else}}<span class="muted">{{.State}}</span>{{end}}</td>
-      <td>{{if eq .Check "update"}}<span class="b w" title="{{.CheckText}}">nouvelle image</span> <span class="muted small">{{since .Since}}</span>
-        {{- else if eq .Check "ok"}}<span class="b ok">à jour</span>
-        {{- else if eq .Check "local"}}<span class="b" title="{{.CheckText}}">image locale</span>
-        {{- else if eq .Check "pinned"}}<span class="b" title="{{.CheckText}}">épinglée</span>
-        {{- else if eq .Check "unknown"}}<span class="b" title="{{.CheckText}}">inconnu</span>
-        {{- else}}<span class="muted">—</span>{{end}}</td>
-      <td>{{with .NewTag}}<span class="b v">{{.}}</span>{{end}}</td>
-      <td>{{with .ChangelogURL}}<a href="{{.}}" target="_blank" rel="noopener noreferrer">changelog ↗</a>{{end}}</td>
+      {{template "ctr-cells" .}}
     </tr>
     {{end}}
     </tbody>

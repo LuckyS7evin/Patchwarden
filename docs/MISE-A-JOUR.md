@@ -57,6 +57,21 @@ Attendu :
 Dans le navigateur, rechargez avec **Ctrl+Maj+R** pour charger le nouveau CSS et le
 nouveau JavaScript (sur téléphone : vider le cache du site, ou fermer et rouvrir l'onglet).
 
+## Changer de branche
+
+Le CT 103 met à jour la branche sur laquelle le dépôt est placé. Pour en changer :
+
+```bash
+cd /root/Patchwarden
+git fetch origin
+git status -sb                 # 1re ligne : branche actuelle (ex. « ## main...origin/main »)
+git switch main                # ou le nom d'une autre branche ; la crée en local si besoin
+```
+
+Puis l'étape 1 habituelle (`git pull --ff-only`, `make build`, …). Une branche qui ne contient
+pas encore les dernières versions fait revenir en arrière : vérifiez avec `git log --oneline -3`.
+Si `git switch` refuse à cause de modifications locales : `git stash`, puis recommencez.
+
 ## En cas de problème
 
 | Symptôme | Piste |

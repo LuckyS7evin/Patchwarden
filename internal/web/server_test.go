@@ -1032,13 +1032,19 @@ func TestDockerUI(t *testing.T) {
 		}
 	}
 	_, page := h.do("GET", "/invites/loki/104/docker?groupe=portainer-12", nil, nil)
-	if !strings.Contains(page, "re-déploiement") || !strings.Contains(page, `name="groupe" value="portainer-12"`) {
+	if !strings.Contains(page, "Stacks et projets à mettre à jour") || !strings.Contains(page, `name="groupe" value="portainer-12" checked`) || !strings.Contains(page, "nouvelles images : mealie") {
 		t.Error("page de confirmation Docker incomplète")
 	}
 	tok := h.csrf()
 	form := url.Values{"csrf": {tok}, "simulation": {"0"}, "groupe": {"portainer-12"}}
 	if resp, _ := h.do("POST", "/invites/loki/104/docker", form, nil); !strings.Contains(resp.Header.Get("Location"), "erreur=") {
 		t.Error("application sans confirmation acceptée")
+	}
+	// Aucune case cochée : refus, et non « tout ».
+	none := url.Values{"csrf": {tok}, "simulation": {"0"}, "choix": {"1"}, "confirme": {"1"}}
+	h.eng.dockerKeys = nil
+	if resp, _ := h.do("POST", "/invites/loki/104/docker", none, nil); !strings.Contains(resp.Header.Get("Location"), "erreur=") || h.eng.dockerKeys != nil {
+		t.Error("aucune stack cochée : la mise à jour ne doit pas tout prendre")
 	}
 	form.Set("confirme", "1")
 	resp, _ := h.do("POST", "/invites/loki/104/docker", form, nil)

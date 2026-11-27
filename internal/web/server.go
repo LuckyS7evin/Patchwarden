@@ -186,6 +186,7 @@ func New(cfg *config.Config, inv Inventory, deps Deps, log *slog.Logger, version
 		},
 	}
 	funcs["upper"] = strings.ToUpper
+	funcs["hasPrefix"] = strings.HasPrefix
 	funcs["guestNoun"] = func(typ string) string {
 		if typ == "qemu" {
 			return "la VM"

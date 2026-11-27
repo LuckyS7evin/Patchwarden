@@ -22,32 +22,38 @@
   <p><a class="btn" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}?onglet=docker">Retour à l'onglet Docker</a></p>
 </section>
 {{else}}
+<form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="choix" value="1">
 <section class="card">
-  <h2>Ce qui sera fait</h2>
-  <ol class="steps">{{range .Steps}}<li>{{.}}</li>{{end}}</ol>
-  {{range .Warnings}}<p class="alert alert-warn">{{.}}</p>{{end}}
+  <h2>Stacks et projets à mettre à jour</h2>
+  <p class="muted small">Seuls les éléments cochés sont mis à jour. Une stack Portainer est re-déployée en entier : toutes ses images sont retéléchargées, et seuls les conteneurs dont l'image a changé sont recréés.</p>
+  <div class="choices">
+  {{range $.Choices}}
+    <label class="check choice"><input type="checkbox" name="groupe" value="{{.Group.Key}}"{{if .Checked}} checked{{end}}>
+      <span><b>{{.Group.Label}}</b>{{if .Group.Instance}} <span class="muted small">· Portainer {{.Group.Instance}}</span>{{else if .Group.WorkDir}} <span class="muted small">· {{.Group.WorkDir}}</span>{{end}}<br>
+      <span class="small">nouvelles images : {{.Images}}</span>
+      {{range .Group.Warnings}}<br><span class="small warn-text">⚠ {{.}}</span>{{end}}</span></label>
+  {{end}}
+  </div>
+  <p class="small muted spaced">Ensuite : anciennes images laissées sur le disque (<code>docker image prune</code> à faire vous-même si besoin) ; détection après la mise à jour, pour vérifier le résultat.</p>
+  {{range .Warnings}}{{if not (hasPrefix . "stack Portainer")}}{{if not (hasPrefix . "projet compose")}}<p class="alert alert-warn">{{.}}</p>{{end}}{{end}}{{end}}
   {{if .Newer}}
-  <p class="small"><b>Versions plus récentes publiées sous un autre tag</b> (non appliquées : changez le tag vous-même après lecture du changelog) :</p>
+  <details><summary class="small">Versions plus récentes publiées sous un autre tag ({{len .Newer}}), non appliquées</summary>
   <ul class="small">{{range .Newer}}<li>{{.}}</li>{{end}}</ul>
+  </details>
   {{end}}
 </section>
 
 <section class="card">
   <h2>Lancer</h2>
   <div class="launch">
-    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker" class="launch-box">
-      <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <input type="hidden" name="simulation" value="1">
-      {{range $.Keys}}<input type="hidden" name="groupe" value="{{.}}">{{end}}
-      {{if .Snap.Possible}}<input type="hidden" name="snapshot" value="1">{{end}}
+    <div class="launch-box">
       <h3>1. Simuler</h3>
-      <p class="muted small">Stacks Portainer : la stack et son fichier sont relus, rien n'est re-déployé. Projets compose : <code>docker compose config</code> vérifie le projet, sans pull ni up.{{if .Snap.Possible}} Vérifie aussi que le snapshot serait accepté.{{end}} Rien n'est modifié.</p>
-      <button type="submit" class="btn sec2">Simuler</button>
-    </form>
-    <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/docker" class="launch-box apply">
-      <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <input type="hidden" name="simulation" value="0">
-      {{range $.Keys}}<input type="hidden" name="groupe" value="{{.}}">{{end}}
+      <p class="muted small">Stacks Portainer : la stack et son fichier sont relus, rien n'est re-déployé. Projets compose : <code>docker compose config</code> vérifie le projet, sans pull ni up. Si la case snapshot est cochée, vérifie aussi qu'il serait accepté. Rien n'est modifié.</p>
+      <button type="submit" name="simulation" value="1" class="btn sec2" formnovalidate>Simuler</button>
+    </div>
+    <div class="launch-box apply">
       <h3>2. Appliquer</h3>
       <div class="snapbox">
       {{if .Snap.Possible}}
@@ -61,16 +67,17 @@
         <p class="small crit">Impossible : {{.Snap.Why}}</p>
       {{end}}
       </div>
-      <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : mettre à jour {{len .Groups}} stack(s) ou projet(s) de <strong>{{.Guest.Name}}</strong></label>
+      <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : mettre à jour les stacks et projets cochés de <strong>{{.Guest.Name}}</strong></label>
       {{if .NeedName}}
       <label>Confirmation renforcée : saisissez le nom de l'invité (<code>{{.Guest.Name}}</code>)
         <input name="nom" required autocomplete="off" pattern="{{.Guest.Name}}">
       </label>
       {{end}}
-      <button type="submit" class="btn d">Appliquer</button>
-    </form>
+      <button type="submit" name="simulation" value="0" class="btn d">Appliquer</button>
+    </div>
   </div>
 </section>
+</form>
 {{end}}
 {{end}}
 </div>

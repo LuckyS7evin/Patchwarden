@@ -131,7 +131,7 @@ func TestDigestAndTags(t *testing.T) {
 		t.Errorf("Newer : %s", n)
 	}
 	other, _ := Parse("nginx:absent")
-	if _, err := c.Digest(ctx, other); err != ErrPrivate {
+	if _, err := c.Digest(ctx, other); err != ErrNotFound {
 		t.Errorf("tag absent : %v", err)
 	}
 }

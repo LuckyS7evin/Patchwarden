@@ -24,6 +24,7 @@ const ActDocker Action = "docker"
 type Portainer interface {
 	Endpoints(ctx context.Context) ([]portainer.Endpoint, error)
 	Containers(ctx context.Context, endpoint int) ([]portainer.Container, error)
+	ProjectContainers(ctx context.Context, endpoint int, project string) ([]portainer.Container, error)
 	Stacks(ctx context.Context) ([]portainer.Stack, error)
 	Stack(ctx context.Context, id int) (portainer.Stack, error)
 	StackFile(ctx context.Context, id int) (string, error)
@@ -559,7 +560,7 @@ func (e *Engine) dockerFunc(p DockerPlan, dryRun, snapshot bool, user string) jo
 			var gerr error
 			switch gr.Kind {
 			case detect.GroupPortainer:
-				gerr = e.redeployStack(ctx, gr, dryRun, log)
+				gerr = e.redeployStack(ctx, gr, updatedContainers(p.Det, gr), dryRun, log)
 			case detect.GroupCompose:
 				gerr = e.composeUpdate(ctx, g, gr, dryRun, log)
 			}
@@ -589,6 +590,21 @@ func (e *Engine) dockerFunc(p DockerPlan, dryRun, snapshot bool, user string) jo
 	}
 }
 
+// updatedContainers : conteneurs démarrés d'un groupe qui ont une nouvelle
+// image (nom → identifiant court actuel).
+func updatedContainers(det *detect.Result, gr detect.DockerGroup) map[string]string {
+	out := map[string]string{}
+	if det == nil {
+		return out
+	}
+	for _, n := range gr.Containers {
+		if c, ok := det.DockerInfo.Container(n); ok && c.Running() && c.UpdateAvailable() {
+			out[n] = c.ID
+		}
+	}
+	return out
+}
+
 func groupNames(gs []detect.DockerGroup) string {
 	n := make([]string, len(gs))
 	for i, g := range gs {
@@ -605,7 +621,7 @@ func guestNoun(g inventory.Guest) string {
 }
 
 // redeployStack re-déploie une stack Portainer (simulation : vérifications seules).
-func (e *Engine) redeployStack(ctx context.Context, gr detect.DockerGroup, dryRun bool, log jobs.Logger) error {
+func (e *Engine) redeployStack(ctx context.Context, gr detect.DockerGroup, want map[string]string, dryRun bool, log jobs.Logger) error {
 	p, ok := e.Portainers[gr.Instance]
 	if !ok {
 		return fmt.Errorf("instance Portainer %q absente de la configuration", gr.Instance)
@@ -656,8 +672,79 @@ func (e *Engine) redeployStack(ctx context.Context, gr detect.DockerGroup, dryRu
 	if err != nil {
 		return err
 	}
+	// Portainer peut répondre avant la fin du re-déploiement : attendre que
+	// les conteneurs soient recréés, sinon la détection de fin verrait un état
+	// intermédiaire (conteneur temporaire « <id>_nom », stack « arrêtée »).
+	if err := e.waitStack(ctx, p, s.EndpointID, gr.Name, want, log); err != nil {
+		return err
+	}
 	log(false, fmt.Sprintf("  stack re-déployée en %s", time.Since(start).Round(time.Second)))
 	return nil
+}
+
+var tempContainerRe = regexp.MustCompile(`^[0-9a-f]{12}_`)
+
+// Délais du suivi d'un re-déploiement (modifiables pour les tests).
+var (
+	stackPoll    = 5 * time.Second
+	stackSettle  = 60 * time.Second
+	stackTimeout = 15 * time.Minute
+)
+
+// waitStack attend la fin d'un re-déploiement : chaque conteneur qui avait
+// une nouvelle image (want : nom → ancien identifiant court) est recréé et
+// démarré, et il ne reste aucun conteneur temporaire de docker compose. Si
+// une image téléchargée se révèle identique (rien n'est recréé), l'état
+// stable depuis une minute suffit.
+func (e *Engine) waitStack(ctx context.Context, p Portainer, endpoint int, project string, want map[string]string, log jobs.Logger) error {
+	start, lastLog, stable := time.Now(), time.Now(), 0
+	for {
+		cs, err := p.ProjectContainers(ctx, endpoint, project)
+		if err == nil {
+			temp, running := false, map[string]string{}
+			for _, c := range cs {
+				n := c.Name()
+				if tempContainerRe.MatchString(n) {
+					temp = true
+				}
+				if c.State == "running" {
+					running[n] = c.ID
+				}
+			}
+			recreated, up := true, true
+			for name, old := range want {
+				id, ok := running[name]
+				if !ok {
+					up, recreated = false, false
+				} else if strings.HasPrefix(id, old) {
+					recreated = false
+				}
+			}
+			switch {
+			case !temp && recreated:
+				return nil
+			case !temp && up && time.Since(start) >= stackSettle:
+				if stable++; stable >= 2 {
+					log(false, "  aucun conteneur recréé : les images téléchargées sont identiques à celles en place")
+					return nil
+				}
+			default:
+				stable = 0
+			}
+		}
+		if time.Since(start) > stackTimeout {
+			return fmt.Errorf("Portainer a accepté le re-déploiement, mais les conteneurs ne sont pas recréés après %s : vérifiez la stack dans Portainer", stackTimeout)
+		}
+		if time.Since(lastLog) >= 30*time.Second {
+			log(false, fmt.Sprintf("  … attente des conteneurs recréés (%s)", time.Since(start).Round(time.Second)))
+			lastLog = time.Now()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(stackPoll):
+		}
+	}
 }
 
 // composeUpdate met à jour un projet compose par le wrapper.

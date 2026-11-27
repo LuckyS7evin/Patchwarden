@@ -162,6 +162,9 @@ const manifestAccept = "application/vnd.oci.image.index.v1+json, application/vnd
 // ErrPrivate : le registre demande un compte (dépôt privé ou inexistant).
 var ErrPrivate = errors.New("dépôt privé ou introuvable sur le registre (aucun compte configuré)")
 
+// ErrNotFound : le registre ne connaît pas ce tag (supprimé, ou image déplacée vers un autre registre).
+var ErrNotFound = errors.New("tag introuvable sur le registre (supprimé, ou image déplacée vers un autre registre)")
+
 // Digest renvoie l'empreinte actuelle du tag sur le registre (celle d'un
 // index multi-architecture s'il y en a un, comme docker la conserve).
 func (c *Client) Digest(ctx context.Context, r Ref) (string, error) {
@@ -300,6 +303,9 @@ func (c *Client) do(ctx context.Context, method, u string, r Ref, accept string)
 				return nil, err
 			}
 			continue
+		case resp.StatusCode == http.StatusNotFound && tk != "":
+			resp.Body.Close()
+			return nil, ErrNotFound
 		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound:
 			resp.Body.Close()
 			return nil, ErrPrivate

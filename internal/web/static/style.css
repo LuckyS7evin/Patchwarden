@@ -389,3 +389,8 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
 .row > span { min-width: 0; }
 /* Boutons de la fiche : un libellé long (« Tâche en cours : … ») passe à la ligne. */
 .ph .acts .btn { white-space: normal; text-align: center; }
+/* Page de confirmation Docker : une case par stack ou projet. */
+.choices { display: flex; flex-direction: column; gap: 8px; }
+.check.choice { align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.check.choice:has(input:checked) { border-color: var(--sel-line); background: var(--sel); }
+.warn-text { color: var(--warn); }

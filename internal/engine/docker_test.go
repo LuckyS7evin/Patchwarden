@@ -68,8 +68,9 @@ esac
 `
 
 type fakePortainer struct {
-	mu   sync.Mutex
-	puts []map[string]any
+	mu    sync.Mutex
+	puts  []map[string]any
+	polls int
 }
 
 func (f *fakePortainer) handler(t *testing.T) http.Handler {
@@ -86,6 +87,21 @@ func (f *fakePortainer) handler(t *testing.T) http.Handler {
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": 1, "Name": "autre", "Status": 1}, {"Id": 2, "Name": "docker", "Type": 2, "Status": 1}})
 		case r.URL.Path == "/api/endpoints/1/docker/containers/json":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "ffffffffffff0000"}})
+		case r.URL.Path == "/api/endpoints/2/docker/containers/json" && strings.Contains(r.URL.Query().Get("filters"), "project=mealie"):
+			// Après le re-déploiement : un conteneur temporaire, puis mealie recréé.
+			f.mu.Lock()
+			n := len(f.puts)
+			f.polls++
+			polls := f.polls
+			f.mu.Unlock()
+			switch {
+			case n == 0:
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "bbbbbbbbbbbb1111", "Names": []string{"/mealie"}, "State": "running"}})
+			case polls < 3:
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "bbbbbbbbbbbb1111", "Names": []string{"/mealie"}, "State": "running"}, {"Id": "eeeeeeeeeeee9999", "Names": []string{"/bbbbbbbbbbbb_mealie"}, "State": "created"}})
+			default:
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "eeeeeeeeeeee9999", "Names": []string{"/mealie"}, "State": "running"}})
+			}
 		case r.URL.Path == "/api/endpoints/2/docker/containers/json":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"Id": "bbbbbbbbbbbb1111"}, {"Id": "cccccccccccc2222"}})
 		case r.URL.Path == "/api/stacks":
@@ -134,6 +150,9 @@ func fakeRegistryHandler() http.Handler {
 
 func setupDocker(t *testing.T) (*env, *fakePortainer) {
 	t.Helper()
+	oldPoll, oldSettle := stackPoll, stackSettle
+	stackPoll, stackSettle = 20*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { stackPoll, stackSettle = oldPoll, oldSettle })
 	e := setup(t)
 	guest := filepath.Join(e.root, "guest")
 	writeExec(t, filepath.Join(e.root, "bin", "docker"), fakeDocker)
@@ -240,6 +259,9 @@ func TestDockerDetectAndUpdate(t *testing.T) {
 	realLog := e.logOf(t, real.ID)
 	if real.Status != jobs.Success {
 		t.Fatalf("mise à jour : %+v\n%s", real, realLog)
+	}
+	if fp.polls < 3 || !strings.Contains(realLog, "stack re-déployée") {
+		t.Errorf("fin du re-déploiement non attendue (%d lectures) :\n%s", fp.polls, realLog)
 	}
 	if len(fp.puts) != 1 || fp.puts[0]["pullImage"] != true || fp.puts[0]["prune"] != false || !strings.Contains(fp.puts[0]["stackFileContent"].(string), "mealie") {
 		t.Errorf("re-déploiement Portainer : %+v", fp.puts)

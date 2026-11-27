@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +59,17 @@ func (s Stack) Git() bool { return s.GitConfig != nil && s.GitConfig.URL != "" }
 // Container est un conteneur vu par Portainer.
 type Container struct {
 	ID     string            `json:"Id"`
+	Names  []string          `json:"Names"`
+	State  string            `json:"State"` // running, created, exited…
 	Labels map[string]string `json:"Labels"`
+}
+
+// Name renvoie le nom du conteneur (sans « / »).
+func (c Container) Name() string {
+	if len(c.Names) == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(c.Names[0], "/")
 }
 
 // Client interroge une instance Portainer.
@@ -166,6 +177,13 @@ func (c *Client) Endpoints(ctx context.Context) ([]Endpoint, error) {
 func (c *Client) Containers(ctx context.Context, endpoint int) ([]Container, error) {
 	var out []Container
 	return out, c.call(ctx, c.http, http.MethodGet, "/endpoints/"+strconv.Itoa(endpoint)+"/docker/containers/json?all=1", nil, &out)
+}
+
+// ProjectContainers liste les conteneurs d'un projet compose (stack) d'un environnement.
+func (c *Client) ProjectContainers(ctx context.Context, endpoint int, project string) ([]Container, error) {
+	f, _ := json.Marshal(map[string][]string{"label": {"com.docker.compose.project=" + project}})
+	var out []Container
+	return out, c.call(ctx, c.http, http.MethodGet, "/endpoints/"+strconv.Itoa(endpoint)+"/docker/containers/json?all=1&filters="+url.QueryEscape(string(f)), nil, &out)
 }
 
 // Stacks liste les stacks.

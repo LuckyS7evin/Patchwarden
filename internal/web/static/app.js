@@ -66,6 +66,21 @@
     });
   });
 
+  // Tâche en cours affichée sur la page (fiche, inventaire) : la page est
+  // rechargée quand elle se termine.
+  var suivis = Array.prototype.slice.call(document.querySelectorAll("[data-suivi]"), 0, 10);
+  if (suivis.length) {
+    var timer = setInterval(function () {
+      if (document.hidden) return;
+      suivis.forEach(function (el) {
+        fetch(el.dataset.suivi, { credentials: "same-origin", cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { if (j && j.fini) { clearInterval(timer); window.location.reload(); } })
+          .catch(function () {});
+      });
+    }, 5000);
+  }
+
   // À traiter : barre de sélection.
   var bar = document.getElementById("lot");
   if (bar) {

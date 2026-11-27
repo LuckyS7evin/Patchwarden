@@ -4,8 +4,9 @@
 <p class="crumbs"><a href="/inventaire">Inventaire</a> › <a href="/invites/{{.Node}}/{{.VMID}}">{{.Name}}</a></p>
 <div class="pagehead">
   <div>
-    <h1 class="tn"><img class="ic lg" src="{{.Icon}}" alt="" width="40" height="40">Retour arrière · {{.Name}}&nbsp;<span class="muted">· LXC {{.VMID}} sur {{.Node}}</span></h1>
+    <h1 class="tn"><img class="ic lg" src="{{.Icon}}" alt="" width="40" height="40">Retour arrière · {{.Name}}&nbsp;<span class="muted">· {{.TypeLabel}} {{.VMID}} sur {{.Node}}</span></h1>
   </div>
+  <a class="btn s push" href="/invites/{{.Node}}/{{.VMID}}?onglet=snapshots" data-retour>← Retour</a>
 </div>
 {{end}}
 

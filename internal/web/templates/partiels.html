@@ -12,7 +12,7 @@
 {{define "statut"}}<span class="st{{if eq .Status "running"}}{{else if eq (statusLabel .Status) "inconnu"}} unk{{else}} off{{end}}"{{if eq (statusLabel .Status) "inconnu"}} title="Le nœud ne publie pas l'état de ses invités au cluster (vérifiez pvestatd sur {{.Node}})"{{end}}><i></i>{{statusLabel .Status}}</span>{{end}}
 
 {{/* Résumé des mises à jour d'une ligne (row). */}}
-{{define "maj"}}{{if .Active}}<a class="b a" href="/taches/{{.Active.ID}}">{{.Active.Kind}} · {{.Active.Status}}…</a>
+{{define "maj"}}{{if .Active}}<a class="b a" href="/taches/{{.Active.ID}}" data-suivi="/taches/{{.Active.ID}}/etat">{{.Active.Kind}} · {{.Active.Status}}…</a>
 {{else if .Det}}{{if .Self}}<span class="b" title="Mises à jour à lancer à la main sur cet invité">héberge PatchWarden</span>{{end}}{{with .Det}}
   {{- if .Apt.Security}}<span class="b c">{{.Apt.Security}} sécu</span>{{end}}
   {{- if .Apt.Total}}<span class="b w">{{.Apt.Total}} apt</span>{{end}}

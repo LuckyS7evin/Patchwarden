@@ -7,6 +7,7 @@
     <h1>Conteneurs Docker · {{.Guest.Name}} <span class="muted">· {{.Guest.TypeLabel}} {{.Guest.VMID}} sur {{.Guest.Node}}</span></h1>
     {{with .Det}}<p class="muted">D'après la détection {{age .At}} ({{date .At}}). <a href="/taches/{{.JobID}}">journal</a></p>{{end}}
   </div>
+  <a class="btn s push" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}?onglet=docker" data-retour>← Retour</a>
   {{if .Guest.Critical}}<span class="b c">invité critique</span>{{end}}
 </div>
 {{end}}

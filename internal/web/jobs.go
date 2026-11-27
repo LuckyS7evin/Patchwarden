@@ -129,6 +129,19 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request, se *session) {
 	s.render(w, "tache", http.StatusOK, d)
 }
 
+// jobState renvoie l'état d'une tâche (suivi par les pages qui l'affichent,
+// sans flux en direct).
+func (s *Server) jobState(w http.ResponseWriter, r *http.Request, _ *session) {
+	j, ok := s.deps.Jobs.Get(r.PathValue("id"))
+	if !ok {
+		http.Error(w, "Tâche inconnue", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"statut": j.Status, "fini": j.Status.Finished()})
+}
+
 type sseLine struct {
 	H string `json:"h"`
 	E bool   `json:"e,omitempty"`
@@ -151,6 +164,9 @@ func (s *Server) jobStream(w http.ResponseWriter, r *http.Request, _ *session) {
 		http.Error(w, "Flux non pris en charge", http.StatusInternalServerError)
 		return
 	}
+	// Le délai de lecture du serveur (ReadTimeout) couperait le flux au bout
+	// de 30 s : il est levé pour cette réponse.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-store")

@@ -22,7 +22,7 @@
     {{end}}
   </div>
   <div class="acts">
-    {{if .Active}}<a class="btn sec2" href="/taches/{{.Active.ID}}">Tâche en cours : {{.Active.Kind}}</a>{{end}}
+    {{if .Active}}<a class="btn sec2" href="/taches/{{.Active.ID}}" data-suivi="/taches/{{.Active.ID}}/etat">Tâche en cours : {{.Active.Kind}}</a>{{end}}
     {{with $.Full}}{{if .OK}}<a class="btn p" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/complet">Tout mettre à jour…</a>{{else}}<span class="btn" aria-disabled="true" title="{{index .Blockers 0}}">Tout mettre à jour</span>{{end}}{{end}}
     {{with $.Sec}}{{if .OK}}<a class="btn" href="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/securite">Sécurité uniquement…</a>{{else}}<span class="btn" aria-disabled="true" title="{{index .Blockers 0}}">Sécurité uniquement</span>{{end}}{{end}}
     {{if .CanDetect}}

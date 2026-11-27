@@ -1149,3 +1149,28 @@ func TestRecetteFeedback(t *testing.T) {
 		t.Error("rafraîchissement sans tâche en cours")
 	}
 }
+
+func TestJobStateAndBackButtons(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, Apt: detect.Apt{Present: true, Total: 3, Security: 2, SecurityStrict: 2}})
+	j, err := h.eng.Execute(h.inv.snap.Guests[0], engine.ActSecurity, true, "admin", false, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		if x, _ := h.jm.Get(j.ID); x.Status.Finished() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	resp, body := h.do("GET", "/taches/"+j.ID+"/etat", nil, nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"fini":true`) {
+		t.Errorf("état : %d %s", resp.StatusCode, body)
+	}
+	for _, p := range []string{"/invites/loki/104/action/securite", "/invites/loki/104/redemarrage?quoi=services"} {
+		if _, page := h.do("GET", p, nil, nil); !strings.Contains(page, "← Retour") {
+			t.Errorf("%s : bouton Retour absent", p)
+		}
+	}
+}

@@ -255,6 +255,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /taches", s.authed(s.jobsPage))
 	mux.HandleFunc("GET /taches/{id}", s.authed(s.jobPage))
 	mux.HandleFunc("GET /taches/{id}/flux", s.authed(s.jobStream))
+	mux.HandleFunc("GET /taches/{id}/etat", s.authed(s.jobState))
 	return securityHeaders(mux)
 }
 

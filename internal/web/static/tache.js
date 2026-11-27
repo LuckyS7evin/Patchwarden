@@ -7,6 +7,30 @@
   var follow = document.getElementById("suivre");
   var steps = Array.prototype.slice.call(document.querySelectorAll("#etapes .s"));
   var es = new EventSource(pre.dataset.flux);
+  var etat = pre.dataset.flux.replace(/\/flux$/, "/etat");
+  var heard = false, errors = 0, poll = null;
+
+  function checkEnd() {
+    fetch(etat, { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.fini) window.location.reload(); })
+      .catch(function () {});
+  }
+  // Sans flux en direct (proxy, réseau, navigateur) : la page suit l'état de
+  // la tâche et se recharge régulièrement, puis à la fin.
+  function fallback() {
+    if (poll) return;
+    es.close();
+    poll = setInterval(checkEnd, 4000);
+    setTimeout(function () { window.location.reload(); }, 15000);
+  }
+  es.onerror = function () {
+    errors++;
+    if (errors >= 3 || es.readyState === 2) fallback();
+  };
+  setTimeout(function () { if (!heard) fallback(); }, 8000);
+  // Retour sur l'onglet (téléphone en veille…) : la tâche a pu finir entre-temps.
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) checkEnd(); });
 
   function has(text, markers) {
     text = text.replace("▶ vm-", "▶ lxc-"); // une VM a les mêmes verbes en vm-
@@ -33,6 +57,8 @@
   }
 
   es.addEventListener("debut", function () {
+    heard = true;
+    errors = 0;
     // Le serveur renvoie tout le journal à chaque (re)connexion.
     pre.textContent = "";
     steps.forEach(function (s) { s.dataset.etat = ""; });

@@ -379,3 +379,5 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
 /* Texte long dans un badge (ligne « Support ») : retour à la ligne. */
 .b.wrap { white-space: normal; text-align: left; line-height: 1.35; }
 .row > span { min-width: 0; }
+/* Boutons de la fiche : un libellé long (« Tâche en cours : … ») passe à la ligne. */
+.ph .acts .btn { white-space: normal; text-align: center; }

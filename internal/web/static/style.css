@@ -134,7 +134,7 @@ input, select, textarea { font: inherit; padding: 6px 9px; border: 1px solid var
 .row > span:first-child { color: var(--mut); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 7px 16px; margin: 0; }
 .kv dt { color: var(--mut); }
-.kv dd { margin: 0; }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .check { display: flex; gap: 10px; align-items: flex-start; }
 details summary { cursor: pointer; font-weight: 600; }
 .empty { color: var(--mut); padding: 24px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
@@ -191,7 +191,8 @@ td.num { font-variant-numeric: tabular-nums; color: var(--mut); }
 .kpi.c { border-color: var(--crit-bg); }
 .kpi.c .v { color: var(--crit); }
 .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-.tools form { display: flex; gap: 8px; align-items: center; margin: 0; }
+.tools form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0; max-width: 100%; }
+.tools select { max-width: 100%; }
 .chip { padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); font-weight: 500; font-size: 12.5px; background: var(--surf); text-decoration: none; }
 .chip b { color: var(--txt); margin-left: 4px; }
 .chip[aria-current="true"] { background: var(--hover); color: var(--txt); border-color: var(--dim); }
@@ -324,7 +325,7 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
 @media (max-width: 1100px) {
   .rcol { display: none; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
-  .cols { grid-template-columns: 1fr; }
+  .cols { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
   .app { flex-direction: column; height: auto; overflow: visible; }
@@ -349,6 +350,9 @@ fieldset.answer legend { font-weight: 600; padding: 0 4px; }
   .batch { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); width: auto; margin: 0; z-index: 20; white-space: normal; padding: 8px 8px 8px 14px; gap: 8px; }
   .batch .muted { display: none; }
   .batch b { flex: 1; min-width: 0; }
+  /* Listes clé / valeur longues (Réglages) : la valeur passe sous la clé. */
+  .kv.stack { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .kv.stack dd { margin-bottom: 10px; }
   .ph { flex-direction: column; align-items: flex-start; }
   .ph .phm { flex: none; width: 100%; }
   .ph .acts { width: 100%; margin-left: 0; }

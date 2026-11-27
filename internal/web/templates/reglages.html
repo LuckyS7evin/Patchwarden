@@ -10,7 +10,7 @@
   {{range .Sections}}
   <section class="card">
     <h2>{{.Title}}</h2>
-    <dl class="kv">
+    <dl class="kv stack">
       {{range .Items}}<dt><code>{{.Key}}</code></dt><dd>{{if .Value}}{{.Value}}{{else}}—{{end}}{{with .Note}}<br><span class="muted small">{{.}}</span>{{end}}</dd>{{end}}
     </dl>
   </section>

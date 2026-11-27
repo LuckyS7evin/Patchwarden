@@ -122,6 +122,11 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, se *sessio
 		maint = append(maint, setting{"auto_security", "désactivée", "rien n'est jamais appliqué sans confirmation"})
 	}
 	add("Maintenance", maint...)
+	met := setting{"metrics", "désactivée", "aucun jeton : /metrics répond 404"}
+	if c.Metrics.Token != "" {
+		met = setting{"metrics", "/metrics", "Prometheus ; jeton " + secret(c.Metrics.Token, c.Metrics.TokenEnv) + ", en-tête Authorization: Bearer"}
+	}
+	add("Métriques", met)
 	sched := strings.Join(c.Schedule.DetectAt, ", ")
 	if sched == "" {
 		sched = "aucune"

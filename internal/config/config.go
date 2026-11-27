@@ -60,7 +60,9 @@ type Config struct {
 	Maintenance []Maintenance `toml:"maintenance"`
 	// AutoSecurity : « Sécurité uniquement » appliqué seul dans une fenêtre.
 	AutoSecurity AutoSecurity `toml:"auto_security"`
-	Notify       []Notify     `toml:"notify"`
+	// Metrics : adresse /metrics (Prometheus), protégée par jeton.
+	Metrics Metrics  `toml:"metrics"`
+	Notify  []Notify `toml:"notify"`
 }
 
 // Maintenance est une fenêtre de maintenance hebdomadaire.
@@ -84,6 +86,12 @@ type AutoSecurity struct {
 	// Snapshot : snapshot avant chaque mise à jour (défaut : true) ; un invité
 	// dont le snapshot est impossible est alors ignoré.
 	Snapshot *bool `toml:"snapshot"`
+}
+
+// Metrics règle l'adresse /metrics. Sans jeton, elle est désactivée.
+type Metrics struct {
+	Token    string `toml:"token"`
+	TokenEnv string `toml:"token_env"`
 }
 
 // Docker règle le suivi des conteneurs.
@@ -433,6 +441,15 @@ func (c *Config) resolveSecrets(getenv func(string) string) error {
 			return fmt.Errorf("portainer %q : la variable d'environnement %s est vide ou absente", p.Name, p.TokenEnv)
 		}
 	}
+	if c.Metrics.TokenEnv != "" {
+		if c.Metrics.Token != "" {
+			return errors.New("metrics : token et token_env sont exclusifs")
+		}
+		c.Metrics.Token = getenv(c.Metrics.TokenEnv)
+		if c.Metrics.Token == "" {
+			return fmt.Errorf("metrics : la variable d'environnement %s est vide ou absente", c.Metrics.TokenEnv)
+		}
+	}
 	if c.Upstream.GitHubTokenEnv != "" {
 		if c.Upstream.GitHubToken != "" {
 			return errors.New("upstream : github_token et github_token_env sont exclusifs")
@@ -607,6 +624,9 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.AutoSecurity.Tag) == "" {
 			add("auto_security.tag ne peut pas être vide")
 		}
+	}
+	if c.Metrics.Token != "" && len(c.Metrics.Token) < 16 {
+		add("metrics : jeton trop court (16 caractères au moins ; par exemple : openssl rand -hex 24)")
 	}
 	if c.Docker.CacheTTL.Duration < time.Minute {
 		add("docker.cache_ttl doit valoir au moins 1m")

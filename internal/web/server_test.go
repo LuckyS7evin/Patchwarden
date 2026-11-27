@@ -1298,3 +1298,31 @@ func TestMaintenanceUI(t *testing.T) {
 		t.Error("« À traiter » : prochaine sécurité automatique absente")
 	}
 }
+
+func TestMetrics(t *testing.T) {
+	h := newHarness(t)
+	if resp, _ := h.do("GET", "/metrics", nil, nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("sans jeton configuré : %d", resp.StatusCode)
+	}
+	h.srv.cfg.Metrics.Token = "un-jeton-assez-long-pour-le-test"
+	_ = h.store.Put("loki/104", detect.Result{At: h.now.Add(-time.Hour), OSID: "debian", OSVersion: "11", FailedUnits: []string{"nginx.service"}, Apt: detect.Apt{Present: true, Total: 3, Security: 2}})
+	if resp, _ := h.do("GET", "/metrics", nil, map[string]string{"Authorization": "Bearer faux"}); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("mauvais jeton : %d", resp.StatusCode)
+	}
+	resp, body := h.do("GET", "/metrics", nil, map[string]string{"Authorization": "Bearer un-jeton-assez-long-pour-le-test"})
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
+		t.Fatalf("métriques : %d", resp.StatusCode)
+	}
+	for _, want := range []string{
+		`patchwarden_apt_security_updates{node="loki",vmid="104",name="termix",type="lxc"} 2`,
+		`patchwarden_failed_units{node="loki",vmid="104",name="termix",type="lxc"} 1`,
+		`patchwarden_os_support{node="loki",vmid="104",name="termix",type="lxc"} 2`,
+		`patchwarden_detection_age_seconds{node="loki",vmid="104",name="termix",type="lxc"} 3600`,
+		`patchwarden_guest_running{node="tyr",vmid="999",name="<script>alert(1)</script>",type="qemu"} 0`,
+		"# TYPE patchwarden_jobs gauge", "patchwarden_jobs_running 0",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("métriques sans %q :\n%s", want, body)
+		}
+	}
+}

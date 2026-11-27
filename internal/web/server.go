@@ -236,6 +236,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /icones", s.authed(s.iconHandler))
 	mux.HandleFunc("GET /sante", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /connexion", s.loginForm)
 	mux.HandleFunc("POST /connexion", s.sameOrigin(s.loginSubmit))
 	mux.HandleFunc("POST /deconnexion", s.sameOrigin(s.authed(s.csrf(s.logout))))

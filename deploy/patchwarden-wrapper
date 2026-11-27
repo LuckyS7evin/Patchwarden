@@ -12,7 +12,7 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 12) :
+# Verbes (version 13) :
 #   ping                                   version du wrapper et nom du nœud
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
@@ -78,13 +78,14 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=12
+WRAPPER_VERSION=13
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
 TIMEOUT_UPDATE=3600
 # Racine de pmxcfs. Modifiable uniquement pour les tests : un client SSH ne peut
 # pas transmettre cette variable (sshd n'accepte par défaut que LANG et LC_*).
+# Ne jamais ajouter PATCHWARDEN_* à AcceptEnv dans sshd_config.
 PVE_DIR="${PATCHWARDEN_PVE_DIR:-/etc/pve}"
 LOG_DIR="${PATCHWARDEN_LOG_DIR:-/var/log/patchwarden}"
 LOCK_DIR="${PATCHWARDEN_LOCK_DIR:-/run/lock}"
@@ -289,13 +290,14 @@ fi
 if has apt-get; then
 	kv apt.present 1
 	if [ "$REFRESH" = 1 ]; then
-		apt-get update -q </dev/null >/tmp/.pw-apt-update.log 2>&1
+		ulog="$(mktemp /tmp/.pw-apt-update.XXXXXX)"
+		apt-get update -q </dev/null >"$ulog" 2>&1
 		rc=$?
 		kv apt.refresh_rc "$rc"
 		if [ "$rc" != 0 ]; then
-			grep -E '^(E|W):' /tmp/.pw-apt-update.log | tail -n 3 | while IFS= read -r l; do kv apt.refresh_err "$l"; done
+			grep -E '^(E|W):' "$ulog" | tail -n 3 | while IFS= read -r l; do kv apt.refresh_err "$l"; done
 		fi
-		rm -f /tmp/.pw-apt-update.log
+		rm -f "$ulog"
 	fi
 	newest="$(find /var/lib/apt/lists -maxdepth 1 -type f -name '*Release' -printf '%T@\n' 2>/dev/null | sort -n | tail -n 1)"
 	if [ -n "$newest" ]; then kv apt.index_age_h "$(( ($(date +%s) - ${newest%.*}) / 3600 ))"; fi
@@ -629,15 +631,18 @@ vm_cmd() {
 # vm_stream : dépose le script dans la VM, le lance en arrière-plan, puis relit
 # son journal par décalage jusqu'au code de sortie.
 vm_stream() {
-	local t="$1" f off=0 n rc="" start=$SECONDS chunk errf
+	local t="$1" d f off=0 n rc="" start=$SECONDS chunk errf
 	shift
-	f="${VM_TMP}/patchwarden-$(date +%s)-$$"
 	chunk="$(mktemp)" errf="$(mktemp)"
-	if ! vm_cmd 60 sh -c 'umask 077; cat > "$1.sh"' sh "$f"; then
+	# Dossier de travail créé par mktemp dans la VM (nom imprévisible, droits
+	# 700) : un utilisateur de la VM ne peut pas y préparer de lien piégé.
+	d="$(vm_cmd 60 sh -c 'umask 077; d="$(mktemp -d "$1/patchwarden-XXXXXXXX")" && cat > "$d/s.sh" && printf "%s" "$d"' sh "$VM_TMP")"
+	if [[ ! "$d" =~ ^/[A-Za-z0-9._/-]+/patchwarden-[A-Za-z0-9]{8}$ ]]; then
 		echo "PW-ERREUR: dépôt du script dans la VM impossible"
 		rm -f "$chunk" "$errf"
 		return 5
 	fi
+	f="$d/s"
 	if ! vm_cmd 30 sh -c "$VM_LAUNCH" sh "$f" "$@" </dev/null; then
 		echo "PW-ERREUR: lancement du script dans la VM impossible"
 		rm -f "$chunk" "$errf"
@@ -660,7 +665,7 @@ vm_stream() {
 			return 124
 		fi
 	done
-	vm_cmd 30 rm -f "$f.sh" "$f.log" "$f.rc" </dev/null >/dev/null 2>&1
+	vm_cmd 30 rm -rf "$d" </dev/null >/dev/null 2>&1
 	rm -f "$chunk" "$errf"
 	return "$rc"
 }

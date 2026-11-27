@@ -330,3 +330,17 @@ func TestScheduledReportIncludesDockerImages(t *testing.T) {
 		t.Errorf("rapport sans les nouvelles images Docker : %+v", msgs)
 	}
 }
+
+func TestRegistryAllowList(t *testing.T) {
+	e, _ := setupDocker(t)
+	e.eng.Registries = map[string]bool{"docker.io": true}
+	e.detectGuest(t, e.guest)
+	det, _ := e.eng.Store.Get(e.guest.Key())
+	m, _ := det.DockerInfo.Container("mealie")
+	if m.Check != detect.CheckUnknown || !strings.Contains(m.CheckText, "registre non autorisé : ghcr.io") {
+		t.Errorf("ghcr.io hors liste : %+v", m)
+	}
+	if b, _ := det.DockerInfo.Container("beszel"); b.Check != detect.CheckUpdate {
+		t.Errorf("docker.io autorisé : %+v", b)
+	}
+}

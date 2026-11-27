@@ -234,6 +234,10 @@ func serve(args []string) error {
 	}
 	if *cfg.Docker.RegistryCheck {
 		eng.Registry = registry.New(cfg.Docker.CacheTTL.Duration, nil)
+		eng.Registries = map[string]bool{}
+		for _, r := range cfg.Docker.Registries {
+			eng.Registries[strings.ToLower(strings.TrimSpace(r))] = true
+		}
 	}
 	if len(cfg.Portainer) > 0 {
 		eng.Portainers = map[string]engine.Portainer{}

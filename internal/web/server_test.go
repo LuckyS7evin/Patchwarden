@@ -44,6 +44,8 @@ type fakeEngine struct {
 	scheduled           string
 	cancelled           string
 	auto                bool
+	cycled              string
+	pruned              bool
 }
 
 func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
@@ -264,6 +266,33 @@ func (f *fakeEngine) NextAuto(now time.Time) time.Time {
 }
 
 func (f *fakeEngine) AutoCandidates() []inventory.Guest { return nil }
+
+func (f *fakeEngine) CanCycle(g inventory.Guest) error {
+	if g.Status != "stopped" || g.Type != "lxc" {
+		return errors.New("non")
+	}
+	return nil
+}
+
+func (f *fakeEngine) CycleNeedName(g inventory.Guest) bool { return g.Critical }
+
+func (f *fakeEngine) Cycle(g inventory.Guest, a engine.Action, dry bool, user string, confirmed bool, name string, snap bool) (jobs.Job, error) {
+	if !dry && !confirmed {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	f.cycled = string(a)
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindCycle, t, dry, user, func(context.Context, jobs.Job, jobs.Logger) (string, error) { return "CT arrêté de nouveau", nil })
+}
+
+func (f *fakeEngine) DockerPrune(g inventory.Guest, dry bool, user string, confirmed bool) (jobs.Job, error) {
+	if !dry && !confirmed {
+		return jobs.Job{}, engine.ErrConfirm
+	}
+	f.pruned = true
+	t := jobs.Target{Node: g.Node, VMID: g.VMID, Type: g.Type, Name: g.Name}
+	return f.jm.Submit(jobs.KindPrune, t, dry, user, func(context.Context, jobs.Job, jobs.Logger) (string, error) { return "2 images", nil })
+}
 
 func (f *fakeEngine) CheckURL(key string) string { return f.checks[key] }
 
@@ -1324,5 +1353,40 @@ func TestMetrics(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("métriques sans %q :\n%s", want, body)
 		}
+	}
+}
+
+func TestCycleAndPruneUI(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	snap := h.inv.snap
+	snap.Guests = append(snap.Guests, inventory.Guest{Node: "loki", Type: "lxc", VMID: 120, Name: "eteint", Status: "stopped"})
+	h.inv.snap = snap
+	_ = h.store.Put("loki/120", detect.Result{At: h.now, Apt: detect.Apt{Present: true}, Snap: detect.SnapInfo{Known: true, Possible: true}})
+	_, page := h.do("GET", "/invites/loki/120", nil, nil)
+	if !strings.Contains(page, "Invité arrêté") || !strings.Contains(page, "Démarrer, mettre à jour, arrêter") {
+		t.Fatal("fiche d'un invité arrêté : carte absente")
+	}
+	tok := h.csrf()
+	resp, _ := h.do("POST", "/invites/loki/120/cycle", url.Values{"csrf": {tok}, "action": {"securite"}, "simulation": {"0"}, "confirme": {"1"}}, nil)
+	if !strings.HasPrefix(resp.Header.Get("Location"), "/taches/") || h.eng.cycled != "securite" {
+		t.Errorf("cycle : %s", resp.Header.Get("Location"))
+	}
+	if resp, _ := h.do("POST", "/invites/loki/120/cycle", url.Values{"csrf": {tok}, "action": {"autre"}}, nil); !strings.Contains(resp.Header.Get("Location"), "erreur=") {
+		t.Error("action inconnue acceptée")
+	}
+
+	r := dockerResult(h.now)
+	r.DockerInfo.Dangling = 4
+	_ = h.store.Put("loki/104", r)
+	if _, tab := h.do("GET", "/invites/loki/104?onglet=docker", nil, nil); !strings.Contains(tab, "image(s) sans nom") || !strings.Contains(tab, "/docker/nettoyer") {
+		t.Error("onglet Docker : nettoyage absent")
+	}
+	if _, todo := h.do("GET", "/", nil, nil); !strings.Contains(todo, "4 images Docker sans nom") {
+		t.Error("« À traiter » : nettoyage Docker absent")
+	}
+	resp, _ = h.do("POST", "/invites/loki/104/docker/nettoyer", url.Values{"csrf": {tok}, "simulation": {"0"}, "confirme": {"1"}}, nil)
+	if !strings.HasPrefix(resp.Header.Get("Location"), "/taches/") || !h.eng.pruned {
+		t.Errorf("nettoyage : %s", resp.Header.Get("Location"))
 	}
 }

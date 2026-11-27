@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/LuckyS7evin/patchwarden/internal/config"
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
+	"github.com/LuckyS7evin/patchwarden/internal/inventory"
 	"github.com/LuckyS7evin/patchwarden/internal/jobs"
 	"github.com/LuckyS7evin/patchwarden/internal/portainer"
 	"github.com/LuckyS7evin/patchwarden/internal/registry"
@@ -44,6 +46,12 @@ inspect)
 	*) echo "" ;;
 	esac ;;
 image)
+	case "$2" in
+	ls)
+		if [ "$3" = -q ]; then printf 'sha256:aaa\nsha256:bbb\n'; else echo "PW:   aaa · créée 3 weeks ago · 120MB"; fi
+		exit 0 ;;
+	prune) echo "docker image prune" >> "$PCT_SET_LOG"; echo "Total reclaimed space: 240MB"; exit 0 ;;
+	esac
 	# docker image inspect --format … <id ou référence> : empreintes, séparées par des virgules.
 	a="${@: -1}"
 	case "$a" in
@@ -302,5 +310,23 @@ func TestDockerWithoutPortainer(t *testing.T) {
 	p := e.eng.PlanDocker(e.guest, nil)
 	if !p.OK() || len(p.Groups) != 1 || p.Groups[0].Key != "compose-beszel" {
 		t.Errorf("plan : %+v", p)
+	}
+}
+
+func TestScheduledReportIncludesDockerImages(t *testing.T) {
+	e, _ := setupDocker(t)
+	box := withInbox(t, e, []string{"applis"})
+	e.eng.ScheduledDetection(context.Background(), []inventory.Guest{e.guest})
+	msgs := waitMsgs(box, 1)
+	var found bool
+	for _, m := range msgs {
+		title, _ := m["title"].(string)
+		body, _ := m["message"].(string)
+		if strings.Contains(title, "image(s) Docker") && strings.Contains(body, "Images Docker :") && strings.Contains(body, "mealie (ghcr.io/mealie-recipes/mealie:v1.8.0)") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("rapport sans les nouvelles images Docker : %+v", msgs)
 	}
 }

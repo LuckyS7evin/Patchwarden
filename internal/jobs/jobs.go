@@ -53,6 +53,10 @@ const (
 	KindReboot Kind = "redémarrage du CT"
 	// KindDocker : mise à jour des conteneurs Docker.
 	KindDocker Kind = "conteneurs Docker"
+	// KindCycle : invité arrêté démarré, mis à jour puis arrêté.
+	KindCycle Kind = "démarrer, mettre à jour, arrêter"
+	// KindPrune : suppression des images Docker sans nom.
+	KindPrune Kind = "nettoyage Docker"
 )
 
 // Target est l'invité visé.

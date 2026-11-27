@@ -52,6 +52,7 @@ type Report struct {
 	Failures    []string
 	NewSecurity []string // « termix (loki/104) : 3 nouveau(x), 65 en attente »
 	NewApps     []string // « termix (loki/104) : release-2.6.1-tag → v26.11.1 »
+	NewImages   []string // « Portainer (tyr/102) : paperless-broker-1 (redis:8) »
 	NewSecCount int
 }
 
@@ -94,11 +95,17 @@ func (e *Engine) ScheduledDetection(ctx context.Context, guests []inventory.Gues
 		for _, a := range apps {
 			r.NewApps = append(r.NewApps, fmt.Sprintf("%s : %s %s → %s", label, a.Name, a.Installed, a.Latest))
 		}
+		for _, c := range det.DockerInfo.List {
+			if c.Running() && c.UpdateAvailable() && !c.Since.IsZero() && !c.Since.Before(r.Start) {
+				r.NewImages = append(r.NewImages, fmt.Sprintf("%s : %s (%s)", label, c.Name, c.Image))
+			}
+		}
 	}
 	r.End = time.Now()
 	sort.Strings(r.NewSecurity)
 	sort.Strings(r.NewApps)
-	e.Log.Info("détection planifiée terminée", "nouveaux_correctifs", r.NewSecCount, "nouvelles_versions", len(r.NewApps), "échecs", len(r.Failures))
+	sort.Strings(r.NewImages)
+	e.Log.Info("détection planifiée terminée", "nouveaux_correctifs", r.NewSecCount, "nouvelles_versions", len(r.NewApps), "nouvelles_images", len(r.NewImages), "échecs", len(r.Failures))
 	e.sendReport(r)
 	return r
 }
@@ -114,12 +121,25 @@ func (e *Engine) sendReport(r Report) {
 			Body:  strings.Join(r.NewSecurity, "\n"),
 		})
 	}
-	if len(r.NewApps) > 0 {
-		e.Notify.Notify(notify.Message{
-			Event: notify.EvApps, Priority: 3, URL: e.link("/"),
-			Title: fmt.Sprintf("PatchWarden : %d nouvelle(s) version(s) d'application", len(r.NewApps)),
-			Body:  strings.Join(r.NewApps, "\n"),
-		})
+	if len(r.NewApps) > 0 || len(r.NewImages) > 0 {
+		var title string
+		switch {
+		case len(r.NewImages) == 0:
+			title = fmt.Sprintf("PatchWarden : %d nouvelle(s) version(s) d'application", len(r.NewApps))
+		case len(r.NewApps) == 0:
+			title = fmt.Sprintf("PatchWarden : %d nouvelle(s) image(s) Docker", len(r.NewImages))
+		default:
+			title = fmt.Sprintf("PatchWarden : %d nouvelle(s) version(s) d'application, %d nouvelle(s) image(s) Docker", len(r.NewApps), len(r.NewImages))
+		}
+		body := append([]string(nil), r.NewApps...)
+		if len(r.NewImages) > 0 {
+			if len(body) > 0 {
+				body = append(body, "")
+			}
+			body = append(body, "Images Docker :")
+			body = append(body, r.NewImages...)
+		}
+		e.Notify.Notify(notify.Message{Event: notify.EvApps, Priority: 3, URL: e.link("/"), Title: title, Body: strings.Join(body, "\n")})
 	}
 	if len(r.Failures) > 0 {
 		e.Notify.Notify(notify.Message{

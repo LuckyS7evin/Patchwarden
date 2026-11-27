@@ -62,6 +62,10 @@ type Engine interface {
 	MaintenanceWindows() []window.Window
 	NextAuto(now time.Time) time.Time
 	AutoCandidates() []inventory.Guest
+	CanCycle(g inventory.Guest) error
+	CycleNeedName(g inventory.Guest) bool
+	Cycle(g inventory.Guest, a engine.Action, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
+	DockerPrune(g inventory.Guest, dryRun bool, user string, confirmed bool) (jobs.Job, error)
 	ExecuteDocker(g inventory.Guest, keys []string, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
 }
 
@@ -262,6 +266,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /invites/{node}/{vmid}/reponses", s.sameOrigin(s.authed(s.csrf(s.saveAnswers))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/reglage", s.sameOrigin(s.authed(s.csrf(s.saveSnapPref))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/verification", s.sameOrigin(s.authed(s.csrf(s.saveCheckURL))))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/cycle", s.sameOrigin(s.authed(s.csrf(s.cycleSubmit))))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/docker/nettoyer", s.sameOrigin(s.authed(s.csrf(s.pruneSubmit))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.authed(s.rollbackPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.sameOrigin(s.authed(s.csrf(s.rollbackSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/supprimer", s.sameOrigin(s.authed(s.csrf(s.deleteSnapshot))))

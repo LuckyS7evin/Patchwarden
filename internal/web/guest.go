@@ -42,6 +42,9 @@ type guestData struct {
 	Restart *engine.RestartPlan
 	// CheckURL : adresse vérifiée après chaque opération (vide : aucune).
 	CheckURL string
+	// Invité arrêté : démarrer, mettre à jour, arrêter.
+	CanCycle      bool
+	CycleNeedName bool
 	// Docker : mise à jour des conteneurs (tous les groupes à jour possibles) et
 	// conteneurs par groupe pour l'onglet Docker.
 	Docker       *engine.DockerPlan
@@ -100,6 +103,9 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 	}
 	d.SnapPref = s.deps.Engine.SnapPref(g.Key())
 	d.CheckURL = s.deps.Engine.CheckURL(g.Key())
+	if s.deps.Engine.CanCycle(g) == nil {
+		d.CanCycle, d.CycleNeedName = true, s.deps.Engine.CycleNeedName(g)
+	}
 	d.SnapDefaults = s.deps.Engine.SnapDefaults()
 	if err := s.deps.Engine.CanSnapAction(g); err != nil {
 		d.SnapWhy = err.Error()
@@ -214,4 +220,40 @@ func (s *Server) saveCheckURL(w http.ResponseWriter, r *http.Request, se *sessio
 	}
 	s.log.Info("adresse de vérification enregistrée", "invité", g.Key(), "par", se.user)
 	http.Redirect(w, r, guestURL(g)+"?info="+url.QueryEscape("Vérification enregistrée."), http.StatusSeeOther)
+}
+
+// cycleSubmit : démarrer un invité arrêté, le mettre à jour (ou simuler), l'arrêter.
+func (s *Server) cycleSubmit(w http.ResponseWriter, r *http.Request, se *session) {
+	g, ok := s.findGuest(r)
+	if !ok {
+		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
+		return
+	}
+	a, err := engine.ParseAction(r.PostFormValue("action"))
+	if err == nil {
+		var j jobs.Job
+		j, err = s.deps.Engine.Cycle(g, a, r.PostFormValue("simulation") == "1", se.user, r.PostFormValue("confirme") == "1", r.PostFormValue("nom"), r.PostFormValue("snapshot") == "1")
+		if err == nil {
+			s.log.Info("démarrer, mettre à jour, arrêter", "invité", g.Key(), "action", a, "tâche", j.ID, "par", se.user)
+			http.Redirect(w, r, "/taches/"+j.ID, http.StatusSeeOther)
+			return
+		}
+	}
+	http.Redirect(w, r, guestURL(g)+"?erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+}
+
+// pruneSubmit : supprimer (ou lister) les images Docker sans nom de l'invité.
+func (s *Server) pruneSubmit(w http.ResponseWriter, r *http.Request, se *session) {
+	g, ok := s.findGuest(r)
+	if !ok {
+		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
+		return
+	}
+	j, err := s.deps.Engine.DockerPrune(g, r.PostFormValue("simulation") == "1", se.user, r.PostFormValue("confirme") == "1")
+	if err != nil {
+		http.Redirect(w, r, guestURL(g)+"?onglet=docker&erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.log.Info("nettoyage Docker demandé", "invité", g.Key(), "tâche", j.ID, "par", se.user)
+	http.Redirect(w, r, "/taches/"+j.ID, http.StatusSeeOther)
 }

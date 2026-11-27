@@ -108,6 +108,13 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 		if !j.DryRun {
 			steps = append(steps, stepView{Label: "Vérification", Detail: "détection, services et conteneurs comparés à l'état d'avant", Start: "▶ lxc-detect"})
 		}
+	case jobs.KindCycle:
+		steps = append(steps,
+			stepView{Label: "Démarrage", Detail: "invité arrêté démarré", Start: "▶ lxc-start", Done: "état après : running"},
+			stepView{Label: "Détection", Detail: "plan établi sur une détection du jour", Start: "▶ lxc-detect", Done: "pw.end=1"},
+			stepView{Label: "Mise à jour", Detail: map[bool]string{true: "simulation", false: "apt, puis vérification"}[j.DryRun], Start: "▶ lxc-apt|▶ lxc-snapshot", Done: "pw.apt_rc="},
+			stepView{Label: "Arrêt", Detail: "arrêt propre, même en cas d'échec", Start: "▶ lxc-shutdown", Done: "état après : stopped"},
+		)
 	case jobs.KindRollback:
 		steps = append(steps,
 			stepView{Label: "Retour au snapshot", Detail: "CT arrêté puis restauré (pct rollback)", Start: "▶ lxc-rollback", Done: "terminé"},

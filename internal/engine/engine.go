@@ -57,6 +57,8 @@ type Engine struct {
 	hosts          *dockerHosts
 	// ListSnapshots (facultatif) : snapshots d'un invité lus par l'API Proxmox.
 	ListSnapshots SnapLister
+	// Checks : adresse de vérification HTTP de chaque invité (facultatif).
+	Checks *PrefStore
 }
 
 // OSSupport renvoie l'état du support du système d'un invité détecté.
@@ -81,7 +83,7 @@ var (
 )
 
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
-const WrapperVersion = 10
+const WrapperVersion = 11
 
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {

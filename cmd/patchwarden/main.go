@@ -183,6 +183,10 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("réglages de snapshot des invités : %w", err)
 	}
+	checks, err := engine.OpenPrefs(cfg.Jobs.DataDir, "verifications.json")
+	if err != nil {
+		return fmt.Errorf("vérifications des invités : %w", err)
+	}
 	batches, err := engine.OpenBatches(cfg.Jobs.DataDir)
 	if err != nil {
 		return fmt.Errorf("lots : %w", err)
@@ -204,6 +208,7 @@ func serve(args []string) error {
 		PublicURL:  cfg.Server.PublicURL,
 		Snap:       engine.SnapConfig{Default: cfg.Snapshots.Default, Keep: cfg.Snapshots.Keep, MaxPct: cfg.Snapshots.MaxStoragePct},
 		SnapPrefs:  snapPrefs,
+		Checks:     checks,
 		Batches:    batches,
 		EOL:        eol.New(cfg.EOL.Source, nil),
 	}

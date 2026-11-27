@@ -38,6 +38,7 @@ type fakeEngine struct {
 	batches             []engine.Batch
 	store               *detect.Store
 	dockerKeys          []string
+	checks              map[string]string
 }
 
 func (f *fakeEngine) PlanFor(g inventory.Guest, a engine.Action) engine.Plan {
@@ -225,6 +226,19 @@ func (f *fakeEngine) ExecuteDocker(g inventory.Guest, keys []string, dry bool, u
 }
 
 func (f *fakeEngine) SyncSnapshots([]inventory.Guest) {}
+
+func (f *fakeEngine) CheckURL(key string) string { return f.checks[key] }
+
+func (f *fakeEngine) SetCheckURL(key, raw string) error {
+	if raw != "" && !strings.HasPrefix(raw, "http") {
+		return errors.New("adresse invalide")
+	}
+	if f.checks == nil {
+		f.checks = map[string]string{}
+	}
+	f.checks[key] = raw
+	return nil
+}
 
 func (f *fakeEngine) SetAnswers(key string, a map[string]string) error {
 	if f.answers == nil {
@@ -1190,5 +1204,23 @@ func TestPagesNotCached(t *testing.T) {
 		if resp, _ := h.do("GET", p, nil, nil); resp.Header.Get("Cache-Control") != "no-store" {
 			t.Errorf("%s : Cache-Control %q", p, resp.Header.Get("Cache-Control"))
 		}
+	}
+}
+
+func TestCheckURLSetting(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, FailedUnits: []string{"nginx.service"}, Apt: detect.Apt{Present: true}})
+	tok := h.csrf()
+	resp, _ := h.do("POST", "/invites/loki/104/verification", url.Values{"csrf": {tok}, "url": {"https://termix.lan"}}, nil)
+	if !strings.Contains(resp.Header.Get("Location"), "info=") || h.eng.checks["loki/104"] != "https://termix.lan" {
+		t.Fatalf("enregistrement : %s", resp.Header.Get("Location"))
+	}
+	_, page := h.do("GET", "/invites/loki/104", nil, nil)
+	if !strings.Contains(page, `value="https://termix.lan"`) || !strings.Contains(page, "Vérification après une opération") || !strings.Contains(page, ">nginx.service<") {
+		t.Error("fiche : réglage de vérification ou services en échec absents")
+	}
+	if resp, _ := h.do("POST", "/invites/loki/104/verification", url.Values{"csrf": {tok}, "url": {"ftp://x"}}, nil); !strings.Contains(resp.Header.Get("Location"), "erreur=") {
+		t.Error("adresse invalide acceptée")
 	}
 }

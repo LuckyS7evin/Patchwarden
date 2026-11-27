@@ -53,6 +53,8 @@ type Engine interface {
 	OSSupport(r detect.Result) eol.Status
 	PlanDocker(g inventory.Guest, keys []string) engine.DockerPlan
 	SyncSnapshots(guests []inventory.Guest)
+	CheckURL(key string) string
+	SetCheckURL(key, raw string) error
 	ExecuteDocker(g inventory.Guest, keys []string, dryRun bool, user string, confirmed bool, typedName string, snapshot bool) (jobs.Job, error)
 }
 
@@ -250,6 +252,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /invites/{node}/{vmid}/action/{action}", s.sameOrigin(s.authed(s.csrf(s.actionSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/reponses", s.sameOrigin(s.authed(s.csrf(s.saveAnswers))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/reglage", s.sameOrigin(s.authed(s.csrf(s.saveSnapPref))))
+	mux.HandleFunc("POST /invites/{node}/{vmid}/verification", s.sameOrigin(s.authed(s.csrf(s.saveCheckURL))))
 	mux.HandleFunc("GET /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.authed(s.rollbackPage))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/restaurer", s.sameOrigin(s.authed(s.csrf(s.rollbackSubmit))))
 	mux.HandleFunc("POST /invites/{node}/{vmid}/snapshots/{name}/supprimer", s.sameOrigin(s.authed(s.csrf(s.deleteSnapshot))))

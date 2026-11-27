@@ -74,7 +74,7 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 			steps = append(steps, stepView{Label: "Application", Detail: cs, Start: "▶ lxc-cs-update|▶ update community-scripts", Done: "pw.update_rc=|serait lancé"})
 		}
 		if !j.DryRun {
-			steps = append(steps, stepView{Label: "Vérification", Detail: "détection après la mise à jour", Start: "▶ lxc-detect", Done: "pw.end=1"})
+			steps = append(steps, stepView{Label: "Vérification", Detail: "détection, services et conteneurs comparés à l'état d'avant", Start: "▶ lxc-detect"})
 		}
 	case jobs.KindDocker:
 		if anyLine(lines, "0. snapshot avant") {
@@ -106,7 +106,7 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 			}
 		}
 		if !j.DryRun {
-			steps = append(steps, stepView{Label: "Vérification", Detail: "détection après la mise à jour", Start: "▶ lxc-detect", Done: "pw.end=1"})
+			steps = append(steps, stepView{Label: "Vérification", Detail: "détection, services et conteneurs comparés à l'état d'avant", Start: "▶ lxc-detect"})
 		}
 	case jobs.KindRollback:
 		steps = append(steps,
@@ -117,12 +117,12 @@ func stepsFor(j jobs.Job, lines []jobs.Line) []stepView {
 	case jobs.KindServices:
 		steps = append(steps,
 			stepView{Label: "Redémarrage des services", Detail: "systemctl restart, services système exclus", Start: "▶ lxc-restart-services", Done: "pw.restarted="},
-			stepView{Label: "Vérification", Detail: "détection après le redémarrage", Start: "▶ lxc-detect", Done: "pw.end=1"},
+			stepView{Label: "Vérification", Detail: "détection, services et conteneurs comparés à l'état d'avant", Start: "▶ lxc-detect"},
 		)
 	case jobs.KindReboot:
 		steps = append(steps,
 			stepView{Label: "Redémarrage du CT", Detail: "pct reboot", Start: "▶ lxc-reboot", Done: "PW: état après"},
-			stepView{Label: "Vérification", Detail: "détection après le redémarrage", Start: "▶ lxc-detect", Done: "pw.end=1"},
+			stepView{Label: "Vérification", Detail: "détection, services et conteneurs comparés à l'état d'avant", Start: "▶ lxc-detect"},
 		)
 	default:
 		return nil

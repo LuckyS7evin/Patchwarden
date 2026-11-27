@@ -32,6 +32,8 @@ type Container struct {
 	Since        time.Time `json:"since,omitempty"` // première détection de la nouvelle image
 	// Kind : rôle particulier (watchtower, portainer, agent).
 	Kind string `json:"kind,omitempty"`
+	// Health : état du HEALTHCHECK (healthy, unhealthy, starting), vide sans healthcheck.
+	Health string `json:"health,omitempty"`
 }
 
 // États de la comparaison avec le registre.

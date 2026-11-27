@@ -91,6 +91,7 @@ func (e *Engine) RestartServices(g inventory.Guest, user string, confirmed bool)
 	if !confirmed {
 		return jobs.Job{}, fmt.Errorf("%w : cochez la case de confirmation", ErrConfirm)
 	}
+	before := e.lastDetection(g)
 	return e.Jobs.Submit(jobs.KindServices, target(g), false, user, func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
 		log(false, fmt.Sprintf("Services à redémarrer d'après la détection : %s", strings.Join(p.Units, ", ")))
 		cmd := fmt.Sprintf("%s %d", verb(g, "restart-services"), g.VMID)
@@ -109,7 +110,7 @@ func (e *Engine) RestartServices(g inventory.Guest, user string, confirmed bool)
 		if err := explainCodes(code, errs, out, 50, 51); err != nil {
 			return summary, err
 		}
-		return summary + e.verify(ctx, g, job, log), nil
+		return e.verify(ctx, g, before, job, log, summary)
 	})
 }
 
@@ -125,6 +126,7 @@ func (e *Engine) Reboot(g inventory.Guest, user string, confirmed bool, typedNam
 	if p.NeedName && strings.TrimSpace(typedName) != g.Name {
 		return jobs.Job{}, fmt.Errorf("%w : saisissez exactement le nom de l'invité (%s)", ErrConfirm, g.Name)
 	}
+	before := e.lastDetection(g)
 	return e.Jobs.Submit(jobs.KindReboot, target(g), false, user, func(ctx context.Context, job jobs.Job, log jobs.Logger) (string, error) {
 		cmd := fmt.Sprintf("%s %d", verb(g, "reboot"), g.VMID)
 		log(false, "▶ "+cmd)
@@ -135,19 +137,25 @@ func (e *Engine) Reboot(g inventory.Guest, user string, confirmed bool, typedNam
 		if err := explainCodes(code, errs, out, 52); err != nil {
 			return "", err
 		}
-		return "CT redémarré" + e.verify(ctx, g, job, log), nil
+		return e.verify(ctx, g, before, job, log, guestNoun(g)+" redémarré")
 	})
 }
 
-// verify relance une détection après une action et la résume.
-func (e *Engine) verify(ctx context.Context, g inventory.Guest, job jobs.Job, log jobs.Logger) string {
-	log(false, "")
-	res, err := e.detectRun(ctx, g, job.ID, log)
+// verify relance une détection après une action, vérifie l'invité et résume.
+func (e *Engine) verify(ctx context.Context, g inventory.Guest, before *detect.Result, job jobs.Job, log jobs.Logger, summary string) (string, error) {
+	res, err := e.afterOp(ctx, g, before, job, log)
 	if err != nil {
-		log(true, "⚠ détection de vérification impossible : "+err.Error())
-		return ""
+		return summary, err
 	}
-	return " · après : " + summarize(res)
+	return summary + " · après : " + summarize(res) + " · vérification réussie", nil
+}
+
+// lastDetection renvoie la dernière détection d'un invité (nil si aucune).
+func (e *Engine) lastDetection(g inventory.Guest) *detect.Result {
+	if d, ok := e.Store.Get(target(g).Key()); ok {
+		return &d
+	}
+	return nil
 }
 
 // explainCodes traduit les codes propres à un verbe (message PW-ERREUR du journal).

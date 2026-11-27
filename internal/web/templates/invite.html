@@ -112,6 +112,20 @@
       {{if gt (len .Jobs) 5}}<a href="?onglet=historique">Tout l'historique →</a>{{end}}
       {{else}}<p class="muted">Aucune tâche.</p>{{end}}
     </section>
+    {{if or (eq .Row.Type "lxc") (eq .Row.Type "qemu")}}
+    <section class="card">
+      <h2>Vérification après une opération</h2>
+      <p class="small">Après chaque mise à jour ou redémarrage réel, PatchWarden compare l'invité à son état d'avant : services systemd en échec, conteneurs arrêtés ou en mauvaise santé. En cas de problème, la tâche échoue et le retour arrière est proposé (jamais lancé seul).</p>
+      <form method="post" action="/invites/{{.Row.Node}}/{{.Row.VMID}}/verification" class="inline-form">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label class="small">Adresse qui doit répondre ensuite (facultatif)
+          <input type="url" name="url" value="{{.CheckURL}}" placeholder="https://paperless.lan" autocomplete="off">
+        </label>
+        <button type="submit" class="btn s">Enregistrer</button>
+      </form>
+      <p class="muted small">Essayée pendant 2 minutes ; statut HTTP inférieur à 400 attendu ; certificat non vérifié (homelab). Vide : pas de vérification HTTP.</p>
+    </section>
+    {{end}}
     {{with .Row.Det}}
     <section class="card">
       <h2>Système</h2>
@@ -122,6 +136,7 @@
         <dt>Ressources</dt><dd>{{.Nproc}} CPU · {{.MemMB}} Mo</dd>
         <dt>Disque /</dt><dd>{{.RootUsedPct}} %{{if ge .RootUsedPct 75}} <span class="b w" title="Le moteur community-scripts refuse de mettre à jour au-delà de 80 %">limite : 80 %</span>{{end}}</dd>
         <dt>Redémarrage</dt><dd>{{if .RebootRequired}}<span class="b w">requis</span>{{else}}non requis{{end}}</dd>
+        {{with .FailedUnits}}<dt>Services en échec</dt><dd>{{range .}}<span class="b c">{{.}}</span> {{end}}</dd>{{end}}
         {{if .CS.Present}}
         <dt>Script</dt><dd>{{if .CS.ScriptURL}}<a href="{{.CS.ScriptURL}}" target="_blank" rel="noopener noreferrer">ct/{{.CS.Script}}.sh</a>{{else}}ct/{{.CS.Script}}.sh{{end}}{{if .CS.PageURL}} · <a href="{{.CS.PageURL}}" target="_blank" rel="noopener noreferrer">page</a>{{end}} · {{if eq .CS.Entry "helper"}}format actuel{{else if eq .CS.Entry "legacy"}}ancien format{{else}}{{.CS.Entry}}{{end}}</dd>
         {{if .CS.Error}}<dt>Problème</dt><dd class="crit">{{.CS.Error}}</dd>{{end}}

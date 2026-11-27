@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/LuckyS7evin/patchwarden/internal/detect"
 	"github.com/LuckyS7evin/patchwarden/internal/engine"
@@ -39,6 +40,8 @@ type guestData struct {
 	TopSec []detect.Package
 	// Restart : redémarrages utiles (services, CT).
 	Restart *engine.RestartPlan
+	// CheckURL : adresse vérifiée après chaque opération (vide : aucune).
+	CheckURL string
 	// Docker : mise à jour des conteneurs (tous les groupes à jour possibles) et
 	// conteneurs par groupe pour l'onglet Docker.
 	Docker       *engine.DockerPlan
@@ -96,6 +99,7 @@ func (s *Server) guestInfo(r *http.Request, se *session) (guestData, bool) {
 		d.DockerGroups = dockerView(det.DockerInfo)
 	}
 	d.SnapPref = s.deps.Engine.SnapPref(g.Key())
+	d.CheckURL = s.deps.Engine.CheckURL(g.Key())
 	d.SnapDefaults = s.deps.Engine.SnapDefaults()
 	if err := s.deps.Engine.CanSnapAction(g); err != nil {
 		d.SnapWhy = err.Error()
@@ -196,3 +200,18 @@ func (s *Server) previewFragment(w http.ResponseWriter, r *http.Request, se *ses
 type byteWriter struct{ b []byte }
 
 func (w *byteWriter) Write(p []byte) (int, error) { w.b = append(w.b, p...); return len(p), nil }
+
+// saveCheckURL enregistre l'adresse vérifiée après chaque opération sur l'invité.
+func (s *Server) saveCheckURL(w http.ResponseWriter, r *http.Request, se *session) {
+	g, ok := s.findGuest(r)
+	if !ok {
+		http.Error(w, "Invité inconnu (rafraîchissez l'inventaire)", http.StatusNotFound)
+		return
+	}
+	if err := s.deps.Engine.SetCheckURL(g.Key(), r.PostFormValue("url")); err != nil {
+		http.Redirect(w, r, guestURL(g)+"?erreur="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.log.Info("adresse de vérification enregistrée", "invité", g.Key(), "par", se.user)
+	http.Redirect(w, r, guestURL(g)+"?info="+url.QueryEscape("Vérification enregistrée."), http.StatusSeeOther)
+}

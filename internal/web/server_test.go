@@ -1092,3 +1092,60 @@ func TestNewerTagsOneLinePerGuest(t *testing.T) {
 		t.Errorf("logo : %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 }
+
+func TestRecetteFeedback(t *testing.T) {
+	h := newHarness(t)
+	h.login()
+	_ = h.store.Put("loki/104", detect.Result{At: h.now, OSID: "debian", OSVersion: "11", OSPretty: "Debian GNU/Linux 11 (bullseye)", Apt: detect.Apt{Present: true, Total: 3, Security: 2, SecurityStrict: 2}})
+
+	// Inventaire : colonnes Type et OS, filtre par OS appliqué sans bouton (data-auto).
+	_, inv := h.do("GET", "/inventaire", nil, nil)
+	for _, want := range []string{"<th>Type</th>", "<th>OS</th>", ">Debian 11<", `<option value="Debian 11"`, "data-auto", "data-auto-btn"} {
+		if !strings.Contains(inv, want) {
+			t.Errorf("inventaire sans %q", want)
+		}
+	}
+	_, flt := h.do("GET", "/inventaire?os=Debian+11", nil, nil)
+	if !strings.Contains(flt, "termix") || strings.Contains(flt, ">PBS<") {
+		t.Error("filtre par OS")
+	}
+
+	// Lot : retour après une erreur avec les choix conservés (snapshot, ligne retirée).
+	_, page := h.do("GET", "/lot?sel=loki/104:securite", nil, nil)
+	if !strings.Contains(page, ">Annuler</a>") || !strings.Contains(page, `name="confirme" value="1" required`) {
+		t.Error("lot : bouton Annuler ou case requise absents")
+	}
+	tok := h.csrf()
+	form := url.Values{"csrf": {tok}, "cle_0": {"loki/104"}, "op_0": {"securite"}, "garder_0": {"1"}, "snap_0": {"1"}, "mode": {"appliquer"}}
+	resp, _ := h.do("POST", "/lot", form, nil)
+	loc := resp.Header.Get("Location")
+	if !strings.Contains(loc, "snap=loki%2F104%3Asecurite") || !strings.Contains(loc, "choix=1") {
+		t.Fatalf("retour sans les choix : %s", loc)
+	}
+	_, back := h.do("GET", loc, nil, nil)
+	if !strings.Contains(back, `name="snap_0" value="1" checked`) || strings.Contains(back, `name="arret" value="1" checked`) {
+		t.Error("snapshot décoché ou « arrêter » recoché au retour")
+	}
+
+	// Simulation réussie : application depuis la page de la tâche ; bouton Retour.
+	j, err := h.eng.Execute(h.inv.snap.Guests[0], engine.ActSecurity, true, "admin", false, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		if x, _ := h.jm.Get(j.ID); x.Status.Finished() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_, task := h.do("GET", "/taches/"+j.ID, nil, nil)
+	for _, want := range []string{"Simulation réussie : appliquer", `action="/invites/loki/104/action/securite"`, `name="simulation" value="0"`, "← Retour", `name="confirme" value="1" required`} {
+		if !strings.Contains(task, want) {
+			t.Errorf("tâche simulée sans %q", want)
+		}
+	}
+	// Page des tâches : rafraîchie seulement quand une tâche tourne.
+	if _, list := h.do("GET", "/taches", nil, nil); strings.Contains(list, `http-equiv="refresh"`) {
+		t.Error("rafraîchissement sans tâche en cours")
+	}
+}

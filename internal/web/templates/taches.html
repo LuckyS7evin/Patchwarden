@@ -1,9 +1,10 @@
+{{define "head"}}{{if .RunningOrQueued}}<meta http-equiv="refresh" content="5">{{end}}{{end}}
 {{define "content"}}
 <div class="content">
   <div class="pagehead">
     <div>
       <h1>Tâches</h1>
-      <p class="sub">{{if .RunningOrQueued}}{{.RunningOrQueued}} en cours ou en attente · {{end}}les 200 plus récentes · une seule tâche à la fois par invité</p>
+      <p class="sub">{{if .RunningOrQueued}}{{.RunningOrQueued}} en cours ou en attente (page actualisée toutes les 5 s) · {{end}}les 200 plus récentes · une seule tâche à la fois par invité</p>
     </div>
     <span class="sp"></span>
     <a class="btn" href="/taches">Actualiser</a>

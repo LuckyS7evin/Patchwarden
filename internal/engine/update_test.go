@@ -250,3 +250,17 @@ func TestNeedsRerun(t *testing.T) {
 		t.Error("faux positif")
 	}
 }
+
+func TestExplainAptFetchError(t *testing.T) {
+	out := []string{
+		"PW: apt-get update",
+		"Err:5 http://security.debian.org bullseye-security Release",
+		"  404  Not Found",
+		"PW-AVERTISSEMENT: apt-get update a signalé des erreurs, la mise à jour continue avec l'index disponible",
+		"E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?",
+	}
+	err := explainApt(100, nil, out)
+	if err == nil || !strings.Contains(err.Error(), "Err:5 http://security.debian.org bullseye-security Release") || !strings.Contains(err.Error(), "apt-get update avait déjà échoué") {
+		t.Errorf("explication : %v", err)
+	}
+}

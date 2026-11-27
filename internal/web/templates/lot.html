@@ -8,6 +8,7 @@
       <h1>Préparer un lot</h1>
       <p class="sub">{{.Source}} · les opérations s'enchaînent une par une, dans l'ordre · rien n'est lancé sans confirmation</p>
     </div>
+    <a class="btn push" href="{{.Back}}" data-retour>Annuler</a>
   </div>
   {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
   {{if not .Rows}}<div class="empty">Aucun invité concerné. Revenez à <a href="/">À traiter</a> et cochez des éléments.</div>
@@ -20,7 +21,7 @@
     <tr{{if .Why}} class="stale"{{end}}>
       <td>
         <input type="hidden" name="cle_{{.Index}}" value="{{.Row.Key}}">
-        <input type="checkbox" name="garder_{{.Index}}" value="1" aria-label="Garder {{.Row.Name}} dans le lot"{{if not .Why}} checked{{else}} disabled{{end}}>
+        <input type="checkbox" name="garder_{{.Index}}" value="1" aria-label="Garder {{.Row.Name}} dans le lot"{{if .Why}} disabled{{else if not .Removed}} checked{{end}}>
       </td>
       <td><div class="tn"><img class="ic" src="{{.Row.Icon}}" alt="" width="28" height="28" loading="lazy"><a href="/invites/{{.Row.Node}}/{{.Row.VMID}}">{{.Row.Name}}</a><span class="id">{{.Row.TypeLabel}} {{.Row.VMID}} · {{.Row.Node}}</span></div></td>
       <td>
@@ -38,7 +39,7 @@
 
   <section class="card spaced">
     <h2>Lancer</h2>
-    <label class="check"><input type="checkbox" name="arret" value="1" checked> <span>Arrêter le lot au premier échec <span class="muted small">(les opérations suivantes sont annulées)</span></span></label>
+    <label class="check"><input type="checkbox" name="arret" value="1"{{if .Stop}} checked{{end}}> <span>Arrêter le lot au premier échec <span class="muted small">(les opérations suivantes sont annulées)</span></span></label>
     <div class="launch spaced">
       <div class="launch-box">
         <h3>1. Simuler</h3>
@@ -48,7 +49,7 @@
       <div class="launch-box apply">
         <h3>2. Appliquer</h3>
         <p class="muted small">{{.Runnable}} opération(s) possible(s). Les invités à confirmation renforcée (OMV, PBS, tag critique) se mettent à jour un par un depuis leur fiche.</p>
-        <label class="check"><input type="checkbox" name="confirme" value="1"> <span>Je confirme : appliquer ce lot</span></label>
+        <label class="check"><input type="checkbox" name="confirme" value="1" required> <span>Je confirme : appliquer ce lot</span></label>
         <button type="submit" name="mode" value="appliquer" class="btn d">Appliquer le lot</button>
       </div>
     </div>

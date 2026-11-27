@@ -117,7 +117,7 @@
       <h2>Système</h2>
       <dl class="kv">
         <dt>OS</dt><dd>{{.OSPretty}}</dd>
-        {{with $.Row.OS}}{{if .Level}}<dt>Support</dt><dd><span class="b {{if eq .Level "crit"}}c{{else if eq .Level "warn"}}w{{else}}ok{{end}}">{{.Text}}</span></dd>{{else if .Text}}<dt>Support</dt><dd class="muted">{{.Text}}</dd>{{end}}{{end}}
+        {{with $.Row.OS}}{{if .Level}}<dt>Support</dt><dd><span class="b wrap {{if eq .Level "crit"}}c{{else if eq .Level "warn"}}w{{else}}ok{{end}}">{{.Text}}</span></dd>{{else if .Text}}<dt>Support</dt><dd class="muted">{{.Text}}</dd>{{end}}{{end}}
         {{if .SpecialLabel}}<dt>Produit</dt><dd>{{.SpecialLabel}} {{.SpecialVersion}}{{if eq .Special "pve"}} <span class="b c">jamais mis à jour par PatchWarden</span>{{else}} <span class="muted small">confirmation renforcée, hors lots</span>{{end}}</dd>{{end}}
         <dt>Ressources</dt><dd>{{.Nproc}} CPU · {{.MemMB}} Mo</dd>
         <dt>Disque /</dt><dd>{{.RootUsedPct}} %{{if ge .RootUsedPct 75}} <span class="b w" title="Le moteur community-scripts refuse de mettre à jour au-delà de 80 %">limite : 80 %</span>{{end}}</dd>

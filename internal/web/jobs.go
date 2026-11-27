@@ -89,6 +89,11 @@ type jobData struct {
 	Steps    []stepView
 	NodeLog  string
 	SnapName string
+	// Apply : simulation réussie d'une mise à jour apt, à appliquer depuis
+	// la même page ; DockerNext : simulation Docker réussie.
+	Apply      *engine.Plan
+	DockerNext bool
+	Back       string // page de l'invité
 }
 
 func (s *Server) jobPage(w http.ResponseWriter, r *http.Request, se *session) {
@@ -101,10 +106,27 @@ func (s *Server) jobPage(w http.ResponseWriter, r *http.Request, se *session) {
 	if err != nil {
 		s.log.Error("lecture du journal", "tâche", j.ID, "erreur", err)
 	}
-	s.render(w, "tache", http.StatusOK, jobData{
+	d := jobData{
 		base: s.base(string(j.Kind)+" · "+j.Target.Name, "taches", se), Job: j, Lines: lines, Live: !j.Status.Finished(),
 		Steps: stepsFor(j, lines), NodeLog: nodeLog(j, lines), SnapName: takenSnapshot(j, lines),
-	})
+		Back: fmt.Sprintf("/invites/%s/%d", url.PathEscape(j.Target.Node), j.Target.VMID),
+	}
+	if j.DryRun && j.Status == jobs.Success {
+		switch j.Kind {
+		case jobs.KindSecurity, jobs.KindFull:
+			if g, ok := s.guestByKey(j.Target.Key()); ok {
+				a := engine.ActFull
+				if j.Kind == jobs.KindSecurity {
+					a = engine.ActSecurity
+				}
+				p := s.deps.Engine.PlanFor(g, a)
+				d.Apply = &p
+			}
+		case jobs.KindDocker:
+			d.DockerNext = true
+		}
+	}
+	s.render(w, "tache", http.StatusOK, d)
 }
 
 type sseLine struct {
@@ -178,6 +200,17 @@ func (s *Server) jobStream(w http.ResponseWriter, r *http.Request, _ *session) {
 			return
 		}
 	}
+}
+
+// guestByKey retrouve un invité de l'inventaire courant (« nœud/vmid »).
+func (s *Server) guestByKey(key string) (inventory.Guest, bool) {
+	snap, _ := s.inv.Current()
+	for _, g := range snap.Guests {
+		if g.Key() == key {
+			return g, true
+		}
+	}
+	return inventory.Guest{}, false
 }
 
 func guestURL(g inventory.Guest) string { return fmt.Sprintf("/invites/%s/%d", g.Node, g.VMID) }

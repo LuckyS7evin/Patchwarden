@@ -27,6 +27,7 @@ type lotRow struct {
 	SnapWhy      string
 	Why          string // raison pour laquelle l'opération sera ignorée
 	Detail       string
+	Removed      bool // décochée par l'utilisateur (retour après une erreur)
 }
 
 type lotData struct {
@@ -35,6 +36,8 @@ type lotData struct {
 	Runnable int
 	Source   string
 	Error    string
+	Back     string // page d'où vient le lot (bouton « Annuler »)
+	Stop     bool   // « arrêter au premier échec »
 }
 
 func opChoices(op engine.Op) []engine.Op {
@@ -101,13 +104,23 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 	q := r.URL.Query()
 	byKey := s.guestsByKey()
 	var reqs []engine.BatchRequest
-	d := lotData{base: s.base("Préparer un lot", "traiter", se), Error: q.Get("erreur")}
+	d := lotData{base: s.base("Préparer un lot", "traiter", se), Error: q.Get("erreur"), Back: "/", Stop: q.Get("choix") == "" || q.Get("arret") == "1"}
+	// Retour après une erreur : les choix faits sur la page sont rendus tels quels.
+	choice := q.Get("choix") == "1"
+	snapSet, removed := map[string]bool{}, map[string]bool{}
+	for _, v := range q["snap"] {
+		snapSet[v] = true
+	}
+	for _, v := range q["retire"] {
+		removed[v] = true
+	}
 	if tag := q.Get("tag"); tag != "" {
 		op, err := engine.ParseOp(q.Get("op"))
 		if err != nil || !op.Update() {
 			op = engine.OpSecurity
 		}
 		d.Source = "tag « " + tag + " » · " + op.Label()
+		d.Back = "/inventaire?grouper=tag"
 		snap, _ := s.inv.Current()
 		for _, g := range snap.Guests {
 			if (g.Type != "lxc" && g.Type != "qemu") || !hasTag(g.Tags, tag) {
@@ -148,8 +161,13 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 	if len(reqs) > maxBatch {
 		reqs = reqs[:maxBatch]
 	}
-	// Snapshot pré-coché comme sur la page de confirmation d'une mise à jour.
+	// Snapshot pré-coché comme sur la page de confirmation d'une mise à jour
+	// (ou tel que choisi, au retour d'une erreur).
 	for i := range reqs {
+		if choice {
+			reqs[i].Snapshot = snapSet[reqs[i].Guest.Key()+":"+string(reqs[i].Op)]
+			continue
+		}
 		if reqs[i].Op.Update() {
 			p := s.deps.Engine.PlanFor(reqs[i].Guest, engine.Action(reqs[i].Op))
 			reqs[i].Snapshot = p.Snap.Checked && p.Snap.Possible
@@ -161,7 +179,7 @@ func (s *Server) batchPrepare(w http.ResponseWriter, r *http.Request, se *sessio
 	why := s.deps.Engine.PreviewBatch(reqs)
 	for i, rq := range reqs {
 		rw := s.rowFor(rq.Guest)
-		lr := lotRow{Index: i, Row: rw, Op: rq.Op, Ops: opChoices(rq.Op), Snapshot: rq.Snapshot, Why: why[i], Detail: s.opDetail(rw, rq.Op)}
+		lr := lotRow{Index: i, Row: rw, Op: rq.Op, Ops: opChoices(rq.Op), Snapshot: rq.Snapshot, Why: why[i], Detail: s.opDetail(rw, rq.Op), Removed: removed[rq.Guest.Key()+":"+string(rq.Op)]}
 		if rq.Op.Update() {
 			p := s.deps.Engine.PlanFor(rq.Guest, engine.Action(rq.Op))
 			lr.SnapPossible, lr.SnapWhy = p.Snap.Possible, p.Snap.Why
@@ -193,12 +211,21 @@ func (s *Server) batchSubmit(w http.ResponseWriter, r *http.Request, se *session
 			continue
 		}
 		keep.Add("sel", key+":"+string(op))
+		snap := r.PostFormValue("snap_"+strconv.Itoa(i)) == "1"
+		if snap {
+			keep.Add("snap", key+":"+string(op))
+		}
 		if r.PostFormValue("garder_"+strconv.Itoa(i)) != "1" {
+			keep.Add("retire", key+":"+string(op))
 			continue // retiré du lot
 		}
-		reqs = append(reqs, engine.BatchRequest{Guest: g, Op: op, Snapshot: r.PostFormValue("snap_"+strconv.Itoa(i)) == "1"})
+		reqs = append(reqs, engine.BatchRequest{Guest: g, Op: op, Snapshot: snap})
 	}
 	back := func(msg string) {
+		keep.Set("choix", "1")
+		if r.PostFormValue("arret") == "1" {
+			keep.Set("arret", "1")
+		}
 		keep.Set("erreur", msg)
 		http.Redirect(w, r, "/lot?"+keep.Encode(), http.StatusSeeOther)
 	}

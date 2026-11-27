@@ -237,7 +237,16 @@ func TestRetention(t *testing.T) {
 		j, _ := m.Submit(KindDetect, tg, false, "admin", func(context.Context, Job, Logger) (string, error) { return "", nil })
 		waitDone(t, m, j.ID)
 	}
-	if got := len(m.List("", 0)); got != 10 {
+	// La purge suit la fin de la tâche (après que son statut est visible) :
+	// laisser le temps à la dernière de passer.
+	got := 0
+	for i := 0; i < 100; i++ {
+		if got = len(m.List("", 0)); got == 10 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got != 10 {
 		t.Errorf("rétention : %d tâches gardées", got)
 	}
 	ents, _ := os.ReadDir(filepath.Join(dir, "jobs"))

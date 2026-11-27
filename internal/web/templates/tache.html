@@ -8,6 +8,7 @@
     <p class="sub">{{.Target.Node}}/{{.Target.VMID}} · demandée par {{.RequestedBy}} le {{date .CreatedAt}}{{if not .StartedAt.IsZero}} · durée {{.Duration}}{{end}}</p>
   </div>
   <span class="sp"></span>
+  <a class="btn s" href="{{$.Back}}" data-retour>← Retour</a>
   <span class="b {{statusClass .Status}}" id="statut">{{.Status}}</span>
 </div>
 {{if .Error}}<p class="alert alert-error" role="alert">{{.Error}}</p>{{end}}
@@ -35,6 +36,38 @@
   </div>
 </div>
 {{if .Live}}<noscript><p class="muted">Le suivi en direct utilise JavaScript : rechargez la page pour voir la suite.</p></noscript>{{end}}
+
+{{with .Apply}}
+<section class="card spaced" id="appliquer">
+  <h2>Simulation réussie : appliquer « {{.Action.Label}} » pour de bon</h2>
+  {{if .Blockers}}
+  <ul>{{range .Blockers}}<li class="crit">{{.}}</li>{{end}}</ul>
+  {{else}}
+  <form method="post" action="/invites/{{.Guest.Node}}/{{.Guest.VMID}}/action/{{.Action}}" class="launch-box apply">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="simulation" value="0">
+    <div class="snapbox">
+    {{if .Snap.Possible}}
+      <label class="check"><input type="checkbox" name="snapshot" value="1" {{if .Snap.Checked}}checked{{end}}> <span>Prendre un snapshot avant la mise à jour</span></label>
+      <p class="muted small"><code>{{.Snap.Name}}</code> (horodaté au lancement) · {{.Snap.Reason}} · {{.Snap.Storage}}. Si le snapshot échoue, la mise à jour est annulée.
+        {{if .Snap.Removed}}<br>Rétention : {{join .Snap.Removed ", "}} sera supprimé.{{end}}</p>
+    {{else}}
+      <label class="check is-disabled"><input type="checkbox" disabled> <span>Snapshot avant la mise à jour</span></label>
+      <p class="small crit">Impossible : {{.Snap.Why}}</p>
+    {{end}}
+    </div>
+    <label class="check"><input type="checkbox" name="confirme" value="1" required> Je confirme : appliquer « {{.Action.Label}} » à <strong>{{.Guest.Name}}</strong></label>
+    {{if .NeedName}}
+    <label>Confirmation renforcée : saisissez le nom de l'invité (<code>{{.Guest.Name}}</code>)
+      <input name="nom" required autocomplete="off" pattern="{{.Guest.Name}}">
+    </label>
+    {{end}}
+    <button type="submit" class="btn d">Appliquer</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+{{if .DockerNext}}<p class="spaced"><a class="btn p" href="/invites/{{.Job.Target.Node}}/{{.Job.Target.VMID}}/docker">Simulation réussie : continuer vers l'application…</a></p>{{end}}
 </div>
 {{end}}
 

@@ -45,6 +45,27 @@
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeDrawer(); });
   }
 
+  // Filtres appliqués dès le choix dans une liste (le bouton reste sans script).
+  document.querySelectorAll("form[data-auto]").forEach(function (f) {
+    f.querySelectorAll("select").forEach(function (s) {
+      s.addEventListener("change", function () { f.submit(); });
+    });
+    var b = f.querySelector("[data-auto-btn]");
+    if (b) b.hidden = true;
+  });
+
+  // « Retour » / « Annuler » : page précédente si elle vient de PatchWarden,
+  // sinon le lien indiqué.
+  document.querySelectorAll("a[data-retour]").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      var ref = document.referrer;
+      if (ref && ref.indexOf(window.location.origin + "/") === 0 && ref !== window.location.href && window.history.length > 1) {
+        e.preventDefault();
+        window.history.back();
+      }
+    });
+  });
+
   // À traiter : barre de sélection.
   var bar = document.getElementById("lot");
   if (bar) {

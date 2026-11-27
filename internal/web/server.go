@@ -444,6 +444,20 @@ type row struct {
 	OS        eol.Status // support du système (vide sans détection)
 }
 
+// OSName : système de l'invité, court (« Debian 12 »), vide sans détection.
+func (r row) OSName() string {
+	if r.Det == nil {
+		return ""
+	}
+	if r.OS.Name != "" {
+		return r.OS.Name
+	}
+	if r.Det.OSPretty != "" {
+		return r.Det.OSPretty
+	}
+	return strings.TrimSpace(r.Det.OSID + " " + r.Det.OSVersion)
+}
+
 // Pending : la dernière détection signale quelque chose à faire.
 func (r row) Pending() bool {
 	return r.Det != nil && (r.Det.Apt.Total > 0 || r.Det.AppUpdates() > 0 || r.Det.RebootRequired || r.Det.DockerInfo.Updates() > 0)
@@ -520,10 +534,10 @@ func viewMatch(key string, r row) bool {
 	return true
 }
 
-type filter struct{ Node, Type, Tag, Q, View string }
+type filter struct{ Node, Type, Tag, Q, View, OS string }
 
 func (f filter) Active() bool {
-	return f.Node != "" || f.Type != "" || f.Tag != "" || f.Q != "" || f.View != ""
+	return f.Node != "" || f.Type != "" || f.Tag != "" || f.Q != "" || f.View != "" || f.OS != ""
 }
 
 func (f filter) match(g inventory.Guest) bool {
@@ -554,7 +568,7 @@ func (f filter) match(g inventory.Guest) bool {
 
 func (f filter) query(view string) string {
 	v := url.Values{}
-	for k, x := range map[string]string{"noeud": f.Node, "type": f.Type, "tag": f.Tag, "q": f.Q, "vue": view} {
+	for k, x := range map[string]string{"noeud": f.Node, "type": f.Type, "tag": f.Tag, "q": f.Q, "vue": view, "os": f.OS} {
 		if x != "" {
 			v.Set(k, x)
 		}
@@ -583,7 +597,7 @@ type inventoryData struct {
 	Views               []view
 	Shown               int
 	Groups              []nodeGroup
-	Nodes, Tags         []string
+	Nodes, Tags, OSes   []string
 	Filter              filter
 	Query               string
 	ByTag               bool
@@ -593,7 +607,7 @@ type inventoryData struct {
 func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *session) {
 	snap, refreshing := s.inv.Current()
 	q := r.URL.Query()
-	f := filter{Node: q.Get("noeud"), Type: q.Get("type"), Tag: q.Get("tag"), Q: strings.TrimSpace(q.Get("q")), View: q.Get("vue")}
+	f := filter{Node: q.Get("noeud"), Type: q.Get("type"), Tag: q.Get("tag"), Q: strings.TrimSpace(q.Get("q")), View: q.Get("vue"), OS: q.Get("os")}
 	d := inventoryData{
 		base:   s.base("Inventaire", "inventaire", se),
 		Loaded: !snap.FetchedAt.IsZero(), Refreshing: refreshing,
@@ -618,6 +632,7 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 	sort.Strings(d.Errors)
 
 	tags := map[string]bool{}
+	oses := map[string]bool{}
 	groups := map[string]*nodeGroup{}
 	counts := make([]int, len(views))
 	for _, g := range snap.Guests {
@@ -644,7 +659,10 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 			}
 			d.K.Snapshots += len(rw.Det.Snap.PW)
 		}
-		if !f.match(g) {
+		if n := rw.OSName(); n != "" {
+			oses[n] = true
+		}
+		if !f.match(g) || (f.OS != "" && rw.OSName() != f.OS) {
 			continue
 		}
 		for i, v := range views {
@@ -719,6 +737,10 @@ func (s *Server) inventoryPage(w http.ResponseWriter, r *http.Request, se *sessi
 		d.Tags = append(d.Tags, t)
 	}
 	sort.Strings(d.Tags)
+	for o := range oses {
+		d.OSes = append(d.OSes, o)
+	}
+	sort.Strings(d.OSes)
 	s.render(w, "inventaire", http.StatusOK, d)
 }
 

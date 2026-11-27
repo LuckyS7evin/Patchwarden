@@ -473,7 +473,16 @@ func explainApt(code int, errs, out []string) error {
 	case 21:
 		return errors.New("aucun dépôt de sécurité configuré dans cet invité")
 	case 100:
-		return fmt.Errorf("apt a échoué (code 100) : %s", lastMatching(out, "E: "))
+		msg := fmt.Sprintf("apt a échoué (code 100) : %s", lastMatching(out, "E: "))
+		if cause := firstMatching(out, "Err:", "E: Failed to fetch"); cause != "" {
+			msg += " · première erreur : " + cause
+		}
+		if firstMatching(out, "apt-get update a signalé des erreurs") != "" {
+			msg += " · apt-get update avait déjà échoué juste avant (dépôt injoignable, déplacé ou archivé ?) : lancez « apt-get update » dans l'invité et lisez ses lignes Err: / W:"
+		} else if strings.Contains(msg, "Unable to fetch") {
+			msg += " · des paquets ont disparu du dépôt depuis le dernier apt-get update : relancez la mise à jour ; si l'erreur revient, lancez « apt-get update » dans l'invité et lisez ses erreurs"
+		}
+		return errors.New(msg)
 	}
 	return explainExit(code, errs)
 }
@@ -499,6 +508,17 @@ func explainCSUpdate(code int, errs, out []string) error {
 		return fmt.Errorf("update a échoué (code %d) : %s", code, lastMatching(out, "[ERROR]", "✖", "✘", "Error", "error"))
 	}
 	return explainExit(code, errs)
+}
+
+func firstMatching(lines []string, subs ...string) string {
+	for _, l := range lines {
+		for _, s := range subs {
+			if strings.Contains(l, s) {
+				return strings.TrimSpace(l)
+			}
+		}
+	}
+	return ""
 }
 
 func lastMatching(lines []string, subs ...string) string {

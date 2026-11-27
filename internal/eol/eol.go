@@ -185,6 +185,7 @@ func (c *Checker) refresh(product string) error {
 	}
 	var raw []struct {
 		Cycle    json.RawMessage `json:"cycle"`
+		Support  json.RawMessage `json:"support"`
 		EOL      json.RawMessage `json:"eol"`
 		Extended json.RawMessage `json:"extendedSupport"`
 	}
@@ -197,7 +198,18 @@ func (c *Checker) refresh(product string) error {
 		if cy == "" {
 			continue
 		}
-		out = append(out, Cycle{Cycle: cy, EOL: rawDate(r.EOL), Extended: rawDate(r.Extended)})
+		c := Cycle{Cycle: cy, EOL: rawDate(r.EOL), Extended: rawDate(r.Extended)}
+		if product == "debian" {
+			// endoflife.date : pour Debian, « eol » est la fin de Debian LTS
+			// (correctifs gratuits) et « extendedSupport » celle d'ELTS, une
+			// offre payante (Freexian) : ignorée. La fin du support standard
+			// (équipe sécurité) est « support » quand il est publié.
+			c.Extended = time.Time{}
+			if std := rawDate(r.Support); !std.IsZero() && std.Before(c.EOL) {
+				c.EOL, c.Extended = std, c.EOL
+			}
+		}
+		out = append(out, c)
 	}
 	if len(out) == 0 {
 		return fmt.Errorf("endoflife.date : réponse vide pour %s", product)

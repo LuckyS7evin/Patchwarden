@@ -483,9 +483,9 @@ verbes `host-*` (hôte autonome, la machine elle-même) y sont refusés. PatchWa
 n'envoie que des verbes et des numéros : le code exécuté dans les invités est contenu dans
 le wrapper, relisible sur le nœud.
 
-| Verbe (wrapper v14) | Effet |
+| Verbe (wrapper v15) | Effet |
 | :--- | :--- |
-| `ping` | Aucun (version du wrapper, nom de la machine, version de Proxmox, identifiant de démarrage) |
+| `ping` | Aucun (version du wrapper, nom de la machine, version de Proxmox, identifiant de démarrage ; hors nœud Proxmox, en plus, charge CPU sur 1 s, mémoire et disque `/`, lus dans `/proc` et par `df`) |
 | `lxc-detect <vmid> <0\|1>` | Lecture : OS, disque, `/usr/bin/update`, simulation apt (`apt-get -s`), Docker. Avec `1` : `apt-get update` (rafraîchit l'index, n'installe rien) |
 | `lxc-versions <vmid> <app>…` | Lecture des fichiers `/root/.<app>` (versions community-scripts) |
 | `lxc-apt <vmid> <security\|full> <0\|1>` | `apt-get update` puis `apt-get --with-new-pkgs upgrade` (dépôts `*-security` seuls en mode `security`). `1` = simulation (`apt-get -s`), rien n'est modifié |

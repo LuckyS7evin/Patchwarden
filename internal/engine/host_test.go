@@ -72,7 +72,7 @@ func setupHost(t *testing.T) *env {
 		cmd.Env = append(os.Environ(),
 			"SSH_ORIGINAL_COMMAND="+command, "PATCHWARDEN_PVE_DIR="+filepath.Join(e.root, "pas-de-pve"), "FAKE_GUEST="+filepath.Join(e.root, "guest"),
 			"PATCHWARDEN_LOG_DIR="+filepath.Join(e.root, "hostlogs"), "PATCHWARDEN_LOCK_DIR="+e.root, "PCT_SET_LOG="+filepath.Join(e.root, "pctset.log"),
-			"PATCHWARDEN_HOST_SHELL=pw-host-sh", "PATCHWARDEN_BOOT_ID="+bootID, "FAKE_BOOT_ID="+bootID,
+			"PATCHWARDEN_HOST_SHELL=pw-host-sh", "PATCHWARDEN_CPU_SAMPLE=0.1", "PATCHWARDEN_BOOT_ID="+bootID, "FAKE_BOOT_ID="+bootID,
 			"PATH="+hostBin+":/usr/bin:/bin")
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		if err := cmd.Run(); err != nil {
@@ -232,8 +232,13 @@ func TestHostVerbsRefused(t *testing.T) {
 	// Côté inventaire : l'hôte répond, il est démarré ; déclaré par erreur sur
 	// un nœud Proxmox, il est refusé.
 	res, err := inventory.HostSource{Host: hostConf("vps"), Runner: e.eng.Runner}.Guests(context.Background())
-	if err != nil || len(res) != 1 || res[0].Status != "running" || res[0].Type != inventory.TypeHost {
-		t.Errorf("source hôte : %+v %v", res, err)
+	if err != nil || len(res) != 3 || res[0].Status != "running" || res[0].Type != inventory.TypeHost {
+		t.Fatalf("source hôte : %+v %v", res, err)
+	}
+	// Wrapper v15 : état de l'hôte, comme un nœud et son stockage.
+	if n, st := res[1], res[2]; n.Type != "node" || n.Node != "vps" || n.MaxMem <= 0 || n.Mem <= 0 || n.CPU < 0 || n.CPU > 1 ||
+		st.Type != "storage" || st.Storage != "/" || st.MaxDisk <= 0 || st.Disk <= 0 || st.Disk > st.MaxDisk {
+		t.Errorf("statistiques de l'hôte : %+v %+v", n, st)
 	}
 	if _, err := (inventory.HostSource{Host: hostConf("loki"), Runner: e.eng.Runner}).Guests(context.Background()); err == nil || !strings.Contains(err.Error(), "nœud Proxmox") {
 		t.Errorf("nœud déclaré en hôte : %v", err)

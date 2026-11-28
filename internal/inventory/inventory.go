@@ -56,6 +56,18 @@ func (g Guest) TypeLabel() string {
 	return "VM"
 }
 
+// Hosts renvoie les hôtes autonomes présents, triés.
+func (s Snapshot) Hosts() []string {
+	var out []string
+	for _, g := range s.Guests {
+		if g.IsHost() {
+			out = append(out, g.Node)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Where situe l'invité : « LXC 104 · loki », ou « hôte autonome ».
 func (g Guest) Where() string {
 	if g.IsHost() {
@@ -142,14 +154,18 @@ type Snapshot struct {
 
 // Nodes renvoie les nœuds Proxmox présents, triés (sans les hôtes autonomes).
 func (s Snapshot) Nodes() []string {
-	set := map[string]bool{}
+	set, hosts := map[string]bool{}, map[string]bool{}
 	for _, g := range s.Guests {
-		if !g.IsHost() {
+		if g.IsHost() {
+			hosts[g.Node] = true
+		} else {
 			set[g.Node] = true
 		}
 	}
 	for n := range s.NodeStats {
-		set[n] = true
+		if !hosts[n] {
+			set[n] = true
+		}
 	}
 	out := make([]string, 0, len(set))
 	for n := range set {
@@ -249,7 +265,7 @@ func (s *Service) Refresh(ctx context.Context) {
 			next.Errors[r.name] = r.err.Error()
 			s.log.Warn("inventaire : point d'accès en erreur", "point", r.name, "erreur", r.err)
 			// Un hôte autonome injoignable reste affiché, en état inconnu.
-			if len(r.res) != 1 || r.res[0].Type != TypeHost {
+			if len(r.res) == 0 || r.res[0].Type != TypeHost {
 				continue
 			}
 		}

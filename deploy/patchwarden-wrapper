@@ -19,9 +19,11 @@
 # invités sont contenus dans ce fichier : PatchWarden n'envoie que des verbes
 # et des identifiants, jamais de code. Rien n'agit sur le nœud lui-même.
 #
-# Verbes (version 14) :
+# Verbes (version 15) :
 #   ping                                   version du wrapper, nom de la machine, version de
-#                                          Proxmox (vide hors nœud), identifiant de démarrage
+#                                          Proxmox (vide hors nœud), identifiant de démarrage ;
+#                                          hors nœud Proxmox, en plus : charge CPU (mesurée
+#                                          sur 1 s), mémoire et disque / (lecture seule)
 #   lxc-detect <vmid> <0|1>                détection dans un LXC démarré (1 = apt-get update avant)
 #   lxc-versions <vmid> <app>...           contenu des fichiers /root/.<app> (versions community-scripts)
 #   lxc-apt <vmid> <security|full> <0|1>   mise à jour apt (1 = simulation, rien n'est modifié)
@@ -94,7 +96,7 @@
 set -uo pipefail
 set -f
 export LC_ALL=C
-WRAPPER_VERSION=14
+WRAPPER_VERSION=15
 NODE="$(hostname)"
 CMD="${SSH_ORIGINAL_COMMAND:-}"
 TIMEOUT_DETECT=900
@@ -108,6 +110,7 @@ PVE_DIR="${PATCHWARDEN_PVE_DIR:-/etc/pve}"
 # SSH_ORIGINAL_COMMAND.
 HOST_SHELL="${PATCHWARDEN_HOST_SHELL:-sh}"
 BOOT_ID_FILE="${PATCHWARDEN_BOOT_ID:-/proc/sys/kernel/random/boot_id}"
+CPU_SAMPLE="${PATCHWARDEN_CPU_SAMPLE:-1}"
 LOG_DIR="${PATCHWARDEN_LOG_DIR:-/var/log/patchwarden}"
 LOCK_DIR="${PATCHWARDEN_LOCK_DIR:-/run/lock}"
 # Attente maximale (s) et intervalle (s) pour que le CT voie ses ressources augmentées.
@@ -1034,6 +1037,20 @@ ${RESTARTSVC}"
 
 boot_id() { tr -cd 'A-Za-z0-9-' <"$BOOT_ID_FILE" 2>/dev/null; }
 
+# Hôte autonome : charge CPU (part non inactive sur CPU_SAMPLE s), mémoire
+# utilisée (MemTotal - MemAvailable) et disque / (comme df). Lecture seule.
+host_stats() {
+	local u n sy id io irq sirq st t1 i1 t2 i2
+	read -r _ u n sy id io irq sirq st _ </proc/stat
+	t1=$((u + n + sy + id + io + irq + sirq + st)) i1=$((id + io))
+	sleep "$CPU_SAMPLE"
+	read -r _ u n sy id io irq sirq st _ </proc/stat
+	t2=$((u + n + sy + id + io + irq + sirq + st)) i2=$((id + io))
+	awk -v dt=$((t2 - t1)) -v di=$((i2 - i1)) 'BEGIN { if (dt > 0) printf "pw.cpu=%.3f\n", (dt - di) / dt; else print "pw.cpu=0" }'
+	awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { if (t) printf "pw.mem_total=%d\npw.mem_used=%d\n", t * 1024, (t - a) * 1024 }' /proc/meminfo
+	df -PT -B1 / 2>/dev/null | awk 'NR == 2 { printf "pw.disk_type=%s\npw.disk_total=%.0f\npw.disk_used=%.0f\n", $2, $4 + $5, $4 }'
+}
+
 # Hôte autonome : le redémarrage est programmé 5 s plus tard pour que la
 # connexion SSH se termine proprement ; PatchWarden suit ensuite le changement
 # d'identifiant de démarrage (verbe ping).
@@ -1155,6 +1172,7 @@ ping)
 	echo "pw.node=${NODE}"
 	echo "pw.pve=$(pveversion 2>/dev/null | head -n 1)"
 	echo "pw.boot_id=$(boot_id)"
+	is_pve || host_stats
 	;;
 detect)
 	[[ ${#ARGS[@]} -eq 3 ]] || refuse "usage : ${VERB} <vmid> <0|1>"

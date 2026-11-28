@@ -28,6 +28,9 @@ type nodeView struct {
 	HasStat bool
 	Storage inventory.StorageStat // stockage des disques des invités
 	HasStor bool
+	// Host : hôte autonome ([[host]]) ; Link : sa fiche.
+	Host bool
+	Link string
 }
 
 // storagesInUse : par nœud, les stockages qui portent des disques de LXC
@@ -53,6 +56,7 @@ func storagesInUse(all map[string]detect.Result) map[string]map[string]bool {
 type shell struct {
 	Nav           navCounts
 	Nodes         []nodeView
+	Hosts         []nodeView // hôtes autonomes
 	Detectable    int
 	NextDetection string
 }
@@ -94,6 +98,19 @@ func (s *Server) shellFor() shell {
 		sh.Nodes = append(sh.Nodes, nodeView{Name: n, Addr: addr, Stat: st, HasStat: ok && (st.MemTotal > 0 || hasStor), Storage: stor, HasStor: hasStor})
 	}
 	sort.Slice(sh.Nodes, func(i, j int) bool { return sh.Nodes[i].Name < sh.Nodes[j].Name })
+	addrs := map[string]string{}
+	for _, h := range s.cfg.Hosts {
+		addrs[h.Name] = h.Address
+	}
+	for _, n := range snap.Hosts() {
+		st, ok := snap.NodeStats[n]
+		stor, hasStor := st.PickStorage(nil)
+		addr := addrs[n]
+		if h, p, err := net.SplitHostPort(addr); err == nil && p == "22" {
+			addr = h
+		}
+		sh.Hosts = append(sh.Hosts, nodeView{Name: n, Addr: addr, Stat: st, HasStat: ok && (st.MemTotal > 0 || hasStor), Storage: stor, HasStor: hasStor, Host: true, Link: "/invites/" + n + "/0"})
+	}
 	if s.deps.NextDetection != nil {
 		if t := s.deps.NextDetection(); !t.IsZero() {
 			sh.NextDetection = t.Local().Format("02/01 à 15:04")

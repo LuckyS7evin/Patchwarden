@@ -5,6 +5,10 @@ PatchWarden joint **directement par SSH**. Il apparaît dans l'inventaire, dans 
 « Hôtes autonomes », avec la même détection que les invités : paquets apt, correctifs de
 sécurité, services à redémarrer, fin de support de l'OS et conteneurs Docker s'il y en a.
 
+Le menu de gauche l'affiche aussi, sous « Hôtes autonomes », avec sa charge CPU, sa mémoire
+et son disque `/`, relevés à chaque rafraîchissement de l'inventaire (wrapper v15 ; avec la
+v14, l'hôte fonctionne, sans ces valeurs).
+
 Systèmes pris en charge : Debian et Ubuntu (apt), avec systemd.
 
 ## Ce qui change par rapport à un invité Proxmox
@@ -63,6 +67,9 @@ le contenu du fichier, puis Entrée et Ctrl+D ; vérifiez ensuite l'empreinte (�
 
 ### Installer, sur le VPS (`sudo -i`)
 
+Ouvrez d'abord un **shell root** (`sudo -i`) et restez-y jusqu'à la fin de la partie 2. Avec
+`sudo cat > fichier`, c'est votre compte, pas root, qui écrit le fichier : « Permission denied ».
+
 ```bash
 apt install sudo                                      # souvent déjà présent
 
@@ -92,7 +99,7 @@ La clé de PatchWarden est celle des nœuds (`/etc/patchwarden/id_ed25519`). Aff
 partie publique, dans le CT 103 :
 
 ```bash
-cat /etc/patchwarden/id_ed25519.pub
+ssh-keygen -y -f /etc/patchwarden/id_ed25519      # pas de fichier .pub : recalculée depuis la clé privée
 ```
 
 Copiez cette ligne (copier-coller dans le terminal suffit, il n'y a pas de fichier à
@@ -138,7 +145,7 @@ Puis :
 ```bash
 systemctl restart patchwarden
 patchwarden check-config
-#   ✔ vps : pw.wrapper_version=14 pw.node=<nom du VPS> pw.pve= pw.boot_id=…
+#   ✔ vps : pw.wrapper_version=15 pw.node=<nom du VPS> pw.pve= pw.boot_id=… pw.cpu=… pw.mem_total=…
 ```
 
 `pw.pve=` doit rester vide : sinon, c'est un nœud Proxmox.
@@ -182,6 +189,7 @@ snapshot. La simulation reste disponible.
 | `from=` refusé alors que la clé est bonne | L'IP publique a changé : corrigez `from=` |
 | `sudo: a password is required` | Ligne sudoers absente ou mal écrite (`visudo -cf /etc/sudoers.d/patchwarden`), ou chemin du wrapper différent |
 | `PW-REFUS: commande vide` | `env_keep` absent de sudoers : la commande demandée n'arrive pas au wrapper |
+| `sudo: unable to resolve host <nom>` dans les journaux (sans effet sur le résultat) | Le nom de la machine manque dans `/etc/hosts` : `echo "127.0.1.1 $(hostname)" >> /etc/hosts` ; avec cloud-init, `manage_etc_hosts: true` (`/etc/cloud/cloud.cfg.d/99-hosts.cfg`) pour qu'il ne soit pas effacé au redémarrage |
 | `sudo: sorry, you must have a tty` | `Defaults requiretty` dans sudoers : ajoutez `Defaults!/usr/local/sbin/patchwarden-wrapper !requiretty` |
 | Inventaire : « hôte vps : … » en erreur, hôte en état inconnu | Le VPS ne répond pas en SSH (réseau, pare-feu de l'hébergeur, fail2ban) |
 | Redémarrage : « l'hôte n'a pas répondu après un nouveau démarrage » | Ouvrez la console de l'hébergeur : PatchWarden ne peut rien faire d'autre |

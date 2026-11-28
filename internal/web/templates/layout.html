@@ -85,7 +85,7 @@
 </html>
 {{define "nodecard"}}
     <div class="node" title="{{if .Stat.Stale}}Nœud injoignable : valeurs de la lecture précédente{{else if not .HasStat}}{{if .Host}}Hôte injoignable, ou wrapper antérieur à la v15 (pas de statistiques){{else}}État non publié par Proxmox{{end}}{{end}}">
-      <div class="h"><span class="dot{{if .Stat.Stale}} off{{else if not .HasStat}} unk{{else if not .Stat.Online}} off{{end}}"></span>{{if .Link}}<a href="{{.Link}}">{{upper .Name}}</a>{{else}}{{upper .Name}}{{end}}{{with .Addr}}<span class="ip">{{.}}</span>{{end}}</div>
+      <div class="h"><span class="dot{{if .Stat.Stale}} off{{else if not .HasStat}} unk{{else if not .Stat.Online}} off{{end}}"></span><span class="nm" title="{{upper .Name}}">{{if .Link}}<a href="{{.Link}}">{{upper .Name}}</a>{{else}}{{upper .Name}}{{end}}</span>{{with .Addr}}<span class="ip" title="{{.}}">{{.}}</span>{{end}}</div>
       {{if .HasStat}}
       <div class="bars">
         <span>CPU</span>{{bar .Stat.CPUPct}}<span>{{.Stat.CPUPct}} %</span>

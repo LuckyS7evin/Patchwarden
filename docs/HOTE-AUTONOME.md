@@ -185,6 +185,7 @@ snapshot. La simulation reste disponible.
 | `from=` refusé alors que la clé est bonne | L'IP publique a changé : corrigez `from=` |
 | `sudo: a password is required` | Ligne sudoers absente ou mal écrite (`visudo -cf /etc/sudoers.d/patchwarden`), ou chemin du wrapper différent |
 | `PW-REFUS: commande vide` | `env_keep` absent de sudoers : la commande demandée n'arrive pas au wrapper |
+| `sudo: unable to resolve host <nom>` dans les journaux (sans effet sur le résultat) | Le nom de la machine manque dans `/etc/hosts` : `echo "127.0.1.1 $(hostname)" >> /etc/hosts` ; avec cloud-init, `manage_etc_hosts: true` (`/etc/cloud/cloud.cfg.d/99-hosts.cfg`) pour qu'il ne soit pas effacé au redémarrage |
 | `sudo: sorry, you must have a tty` | `Defaults requiretty` dans sudoers : ajoutez `Defaults!/usr/local/sbin/patchwarden-wrapper !requiretty` |
 | Inventaire : « hôte vps : … » en erreur, hôte en état inconnu | Le VPS ne répond pas en SSH (réseau, pare-feu de l'hébergeur, fail2ban) |
 | Redémarrage : « l'hôte n'a pas répondu après un nouveau démarrage » | Ouvrez la console de l'hébergeur : PatchWarden ne peut rien faire d'autre |

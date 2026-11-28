@@ -99,6 +99,11 @@ var (
 // WrapperVersion est la version du wrapper attendue sur les nœuds.
 const WrapperVersion = 14
 
+// HostStatsWrapper : version du wrapper qui renvoie, sur un hôte autonome, la
+// charge CPU, la mémoire et le disque (menu de gauche). Facultative : sans
+// elle, l'hôte fonctionne, sans statistiques.
+const HostStatsWrapper = 15
+
 // CanDetect dit si une détection est possible sur cet invité, et sinon pourquoi.
 func (e *Engine) CanDetect(g inventory.Guest) error {
 	switch {

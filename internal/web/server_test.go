@@ -1395,6 +1395,8 @@ func TestHostPages(t *testing.T) {
 	h := newHarness(t)
 	h.inv.snap.Guests = append(h.inv.snap.Guests, inventory.Guest{Node: "vps", Type: inventory.TypeHost, VMID: 0, Name: "vps", Status: "running", Critical: true, CriticalReason: "hôte autonome : ni snapshot ni retour arrière"})
 	h.srv.cfg.Hosts = []config.Host{{Name: "vps", Address: "203.0.113.10:2222", User: "patchwarden"}}
+	h.inv.snap.NodeStats = map[string]inventory.NodeStat{"vps": {Name: "vps", Online: true, CPU: 0.07, MemUsed: 1 << 30, MemTotal: 4 << 30,
+		Storages: []inventory.StorageStat{{Name: "/", Type: "ext4", Used: 30, Total: 100}}, Storage: "/", StorageType: "ext4", StorageUsed: 30, StorageTotal: 100}}
 	h.login()
 	_, inv := h.do("GET", "/inventaire", nil, nil)
 	if !strings.Contains(inv, "Hôtes autonomes · 1 invité(s)") || !strings.Contains(inv, `href="/invites/vps/0"`) || !strings.Contains(inv, `<option value="host"`) {
@@ -1408,6 +1410,11 @@ func TestHostPages(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("fiche de l'hôte sans %q", want)
 		}
+	}
+	side := page[strings.Index(page, `<div class="sec">Hôtes autonomes</div>`)+1:]
+	if !strings.Contains(page, `<div class="sec">Hôtes autonomes</div>`) || !strings.Contains(side, `<a href="/invites/vps/0">VPS</a>`) ||
+		!strings.Contains(side, "203.0.113.10:2222") || !strings.Contains(side, ">Disque<") || !strings.Contains(side, "25 %") {
+		t.Errorf("menu sans l'hôte autonome et son état")
 	}
 	if strings.Contains(page, "onglet=snapshots") || strings.Contains(page, "Hôte 0") {
 		t.Errorf("fiche de l'hôte : onglet Snapshots ou identifiant 0 affiché")

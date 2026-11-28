@@ -24,18 +24,13 @@
   {{if .Shell.Nodes}}
   <div class="sec">Nœuds</div>
   <div class="nodes">
-  {{range .Shell.Nodes}}
-    <div class="node" title="{{if .Stat.Stale}}Nœud injoignable : valeurs de la lecture précédente{{else if not .HasStat}}État non publié par Proxmox{{end}}">
-      <div class="h"><span class="dot{{if .Stat.Stale}} off{{else if not .HasStat}} unk{{else if not .Stat.Online}} off{{end}}"></span>{{upper .Name}}{{with .Addr}}<span class="ip">{{.}}</span>{{end}}</div>
-      {{if .HasStat}}
-      <div class="bars">
-        <span>CPU</span>{{bar .Stat.CPUPct}}<span>{{.Stat.CPUPct}} %</span>
-        <span>RAM</span>{{bar .Stat.MemPct}}<span>{{.Stat.MemPct}} %</span>
-        {{if .HasStor}}<span title="{{.Storage.Name}} ({{.Storage.Type}}) : disques des invités">Stockage</span>{{bar .Storage.Pct}}<span title="{{.Storage.Name}}">{{.Storage.Pct}} %</span>{{end}}
-      </div>
-      {{end}}
-    </div>
+  {{range .Shell.Nodes}}{{template "nodecard" .}}{{end}}
+  </div>
   {{end}}
+  {{if .Shell.Hosts}}
+  <div class="sec">Hôtes autonomes</div>
+  <div class="nodes">
+  {{range .Shell.Hosts}}{{template "nodecard" .}}{{end}}
   </div>
   {{end}}
   <div class="acct">
@@ -88,3 +83,15 @@
 {{block "scripts" .}}{{end}}
 </body>
 </html>
+{{define "nodecard"}}
+    <div class="node" title="{{if .Stat.Stale}}Nœud injoignable : valeurs de la lecture précédente{{else if not .HasStat}}{{if .Host}}Hôte injoignable, ou wrapper antérieur à la v15 (pas de statistiques){{else}}État non publié par Proxmox{{end}}{{end}}">
+      <div class="h"><span class="dot{{if .Stat.Stale}} off{{else if not .HasStat}} unk{{else if not .Stat.Online}} off{{end}}"></span>{{if .Link}}<a href="{{.Link}}">{{upper .Name}}</a>{{else}}{{upper .Name}}{{end}}{{with .Addr}}<span class="ip">{{.}}</span>{{end}}</div>
+      {{if .HasStat}}
+      <div class="bars">
+        <span>CPU</span>{{bar .Stat.CPUPct}}<span>{{.Stat.CPUPct}} %</span>
+        <span>RAM</span>{{bar .Stat.MemPct}}<span>{{.Stat.MemPct}} %</span>
+        {{if .HasStor}}<span title="{{if .Host}}disque / ({{.Storage.Type}}){{else}}{{.Storage.Name}} ({{.Storage.Type}}) : disques des invités{{end}}">{{if .Host}}Disque{{else}}Stockage{{end}}</span>{{bar .Storage.Pct}}<span title="{{.Storage.Name}}">{{.Storage.Pct}} %</span>{{end}}
+      </div>
+      {{end}}
+    </div>
+{{end}}

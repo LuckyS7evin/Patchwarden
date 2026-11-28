@@ -5,6 +5,10 @@ PatchWarden joint **directement par SSH**. Il apparaît dans l'inventaire, dans 
 « Hôtes autonomes », avec la même détection que les invités : paquets apt, correctifs de
 sécurité, services à redémarrer, fin de support de l'OS et conteneurs Docker s'il y en a.
 
+Le menu de gauche l'affiche aussi, sous « Hôtes autonomes », avec sa charge CPU, sa mémoire
+et son disque `/`, relevés à chaque rafraîchissement de l'inventaire (wrapper v15 ; avec la
+v14, l'hôte fonctionne, sans ces valeurs).
+
 Systèmes pris en charge : Debian et Ubuntu (apt), avec systemd.
 
 ## Ce qui change par rapport à un invité Proxmox
@@ -141,7 +145,7 @@ Puis :
 ```bash
 systemctl restart patchwarden
 patchwarden check-config
-#   ✔ vps : pw.wrapper_version=14 pw.node=<nom du VPS> pw.pve= pw.boot_id=…
+#   ✔ vps : pw.wrapper_version=15 pw.node=<nom du VPS> pw.pve= pw.boot_id=… pw.cpu=… pw.mem_total=…
 ```
 
 `pw.pve=` doit rester vide : sinon, c'est un nœud Proxmox.

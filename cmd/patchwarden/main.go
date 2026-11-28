@@ -410,6 +410,9 @@ func checkConfig(args []string) error {
 						pve = strings.TrimSpace(p)
 					}
 				}
+				if isHost[node] && v >= engine.WrapperVersion && v < engine.HostStatsWrapper {
+					fmt.Printf("    ℹ wrapper v%d sur %s : la v%d ajoute CPU, RAM et disque dans le menu (facultatif)\n", v, node, engine.HostStatsWrapper)
+				}
 				if isHost[node] && pve != "" {
 					failed++
 					fmt.Printf("    ✘ %s est déclaré en [[host]] mais c'est un nœud Proxmox (%s) : retirez-le de [[host]]\n", node, pve)
